@@ -377,34 +377,34 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 }
 
 #   create mulitple VMs usnig var, count and interpolation
-resource "azurerm_windows_virtual_machine" "vm_count" {
-  count = var.num_of_vms
-  name                = "countVM${count.index}"
-  resource_group_name = azurerm_resource_group.main_RG.name
-  location            = azurerm_resource_group.main_RG.location
-  size                = "Standard_B1s"
-  admin_username      = "adminuser"
-  admin_password      = azurerm_key_vault_secret.KV_secret.value
-  availability_set_id = azurerm_availability_set.AS_count.id
+# resource "azurerm_windows_virtual_machine" "vm_count" {
+#   count = var.num_of_vms
+#   name                = "countVM${count.index}"
+#   resource_group_name = azurerm_resource_group.main_RG.name
+#   location            = azurerm_resource_group.main_RG.location
+#   size                = "Standard_B1s"
+#   admin_username      = "adminuser"
+#   admin_password      = azurerm_key_vault_secret.KV_secret.value
+#   availability_set_id = azurerm_availability_set.AS_count.id
   
-  network_interface_ids = [
-    azurerm_network_interface.netInterface_iteration[count.index].id
-  ]
+#   network_interface_ids = [
+#     azurerm_network_interface.netInterface_iteration[count.index].id
+#   ]
 
-  os_disk {
-    caching              = "ReadWrite"
-    storage_account_type = "Standard_LRS"
-  }
+#   os_disk {
+#     caching              = "ReadWrite"
+#     storage_account_type = "Standard_LRS"
+#   }
 
-  source_image_reference {
-    publisher = "MicrosoftWindowsServer"
-    offer     = "WindowsServer"
-    sku       = "2016-Datacenter"
-    version   = "latest"
-  }
+#   source_image_reference {
+#     publisher = "MicrosoftWindowsServer"
+#     offer     = "WindowsServer"
+#     sku       = "2016-Datacenter"
+#     version   = "latest"
+#   }
 
-  depends_on = [ azurerm_network_interface.netInterface_iteration, azurerm_resource_group.main_RG, azurerm_key_vault_secret.KV_secret, azurerm_key_vault.KV ]
-}
+#   depends_on = [ azurerm_network_interface.netInterface_iteration, azurerm_resource_group.main_RG, azurerm_key_vault_secret.KV_secret, azurerm_key_vault.KV ]
+# }
 
 # ------------------------------------- virtual machine extension -------------------------------------#
 # resource "azurerm_virtual_machine_extension" "vmextension" {
@@ -824,27 +824,194 @@ resource "azurerm_storage_container" "container_combo" {
 #   description = "prefix of storage account name"
 # }
 
+# ------------------------------------- app service -------------------------------------# ! comment out foreach VMs for more to prevent quota limit !
 
-# ------------------------------------- app service -------------------------------------#
-
+// you can integrate web app to github
 resource "azurerm_service_plan" "company_plan" {
   name                = "company_plan"
   resource_group_name = azurerm_resource_group.main_RG.name
   location            = "eastus2"
   os_type             = "Windows"
-  sku_name            = "B1"
+  sku_name            = "S1" # b1-b3 is basic - s1-s3 is standard - use standard or higher to use deployement slots
 }
-
+#create service plan before app
 resource "azurerm_windows_web_app" "windows_web_app1" {
   name                = "mf37webapp1"
   resource_group_name = azurerm_resource_group.main_RG.name
-  location            = azurerm_service_plan.company_plan.location
+  location            = "eastus2"
   service_plan_id     = azurerm_service_plan.company_plan.id
 
+  #change settings without redeploying your code
+  # powerful feature that allows for dynamic configuration of your apps
+  app_settings = {
+    "APPINSIGHTS_INSTRUMENTATIONKEY" =azurerm_application_insights.application_insights.instrumentation_key      # sends telemtry data like requests, exceptions to application insights
+   "APPLICATIONINSIGHTS_CONNECTION_STRING"=azurerm_application_insights.application_insights.connection_string   # connection strong for app insights
+  }
+
+# activate logs
+  logs {
+    detailed_error_messages = true
+    http_logs {
+      azure_blob_storage {
+        retention_in_days = 7
+        sas_url = "https://${azurerm_storage_account.web_app_logging.name}.blob.core.windows.net/${azurerm_storage_container.SAS_container.name}${data.azurerm_storage_account_blob_container_sas.data_container_SAS.sas}"
+      }
+    }
+  }
+
+# ip restriction must go in the site_config block
   site_config {
     application_stack {
       current_stack = "dotnet"
       dotnet_version = "v6.0"
     }
+# restrict/allow IPs
+    ip_restriction {
+      action = "Allow"
+      ip_address = "0.0.0.0/0"
+      name = "deny_all_traffic"
+      priority = 100
+    }
   }
+}
+
+# resource "azurerm_app_service_source_control" "source_co" {
+#   app_id   = azurerm_linux_web_app.windows_web_app1.id
+#   repo_url = "https://github.com/Azure-Samples/python-docs-hello-world"
+#   branch   = "master"
+# }
+
+# ------------------------------------- web app logging -------------------------------------#
+
+resource "azurerm_storage_account" "web_app_logging" {
+  name                     = "mf37webapplogging"
+  resource_group_name      = azurerm_resource_group.main_RG.name
+  location                 = "eastus2"
+  account_tier             = "Standard"
+  account_replication_type = "GRS"
+
+  tags = {
+    environment = local.staging_env
+  }
+}
+
+resource "azurerm_storage_container" "SAS_container" {
+  name                  = "logs"
+  storage_account_name  = azurerm_storage_account.web_app_logging.name
+  container_access_type = "private"
+}
+
+# use shared access signatrue or SAS token for exisitng container
+# SAS tokens allow access control to various aspects of containers
+data "azurerm_storage_account_blob_container_sas" "data_container_SAS" {
+  connection_string = azurerm_storage_account.web_app_logging.primary_connection_string       # used to access storage account
+  container_name    = azurerm_storage_container.SAS_container.name
+  https_only        = true                                                                    #when true, ensures SAS token can only be used over HTTPS - prevetns token being used from unsecured connections
+
+  ip_address = "168.1.5.65"                                                                   #restricts use of SAS token to this specified ip address
+
+  start  = "2024-10-4"                                                                        #start time for tokens validity
+  expiry = "2024-10-31"                                                                       #end time for tokens validity
+
+  permissions {                                                                               #defines permissions granted by the SAS token
+    read   = true
+    add    = true
+    create = true
+    write  = true
+    delete = true
+    list   = true
+  }
+
+  cache_control       = "max-age=5"                                                          #means content can be cached for 5 seconds
+  content_disposition = "inline"                                                             #how content should be displayed INLINE OR ATTACHMENT - inline should display in browser if possible
+  content_encoding    = "deflate"                                                            # deflate means content is compressed using the deflate algorithm
+  content_language    = "en-US"
+  content_type        = "application/json"                                                   # blobs are in json files
+}
+
+output "sas_url_query_string" {
+  value = data.azurerm_storage_account_blob_container_sas.data_container_SAS.sas
+  sensitive = true                                                                          # marks output as sensitive - will not display in plain text
+}
+#deployement slot - staging, produciton, developement - each has its own URL
+resource "azurerm_windows_web_app_slot" "DP_staging" {
+  name           = "slot1"
+  app_service_id = azurerm_windows_web_app.windows_web_app1.id
+
+  site_config {                                                                             # configures site settings for deployment slot
+    application_stack {
+      current_stack = "dotnet"                                                              # uses .net as framework
+      dotnet_version = "v6.0"
+    }
+  }
+}
+
+resource "azurerm_web_app_active_slot" "active_slot" {
+  slot_id = azurerm_windows_web_app_slot.DP_staging.id
+
+}
+
+# ------------------------------------- log analytics & application insights -------------------------------------#
+
+#before enabling application insights, you must have log analystics workspace in place
+resource "azurerm_log_analytics_workspace" "log_analytics_workspace" {
+  name                = "log-analytics-1"
+  location            = "eastus2"
+  resource_group_name = azurerm_resource_group.main_RG.name
+  sku                 = "PerGB2018"                                # defines pricing tier - perGB2018 means you pay for the data ingested
+  retention_in_days   = 30                                         # specifies how lojng data will be retained
+}
+
+resource "azurerm_application_insights" "application_insights" {
+  name                = "tf-test-appinsights"
+  location            = "eastus2"
+  resource_group_name = azurerm_resource_group.main_RG.name
+  application_type    = "web"                                      # indicates type of application being monitored
+  workspace_id = azurerm_log_analytics_workspace.log_analytics_workspace.id
+
+  depends_on = [ azurerm_log_analytics_workspace.log_analytics_workspace ]
+}
+
+# ------------------------------------- sql database and server -------------------------------------#
+# create a sql server in order to create a database
+resource "azurerm_mssql_server" "mssql_server_1" {
+  name                         = "mf37-sqlserver"
+  resource_group_name          = azurerm_resource_group.main_RG.name
+  location                     = "eastus"
+  version                      = "12.0"
+  administrator_login          = "missadministradminator"
+  administrator_login_password = "Azure@3456"
+  //minimum_tls_version          = "1.2"
+
+  tags = {
+    environment =  local.staging_env
+  }
+}
+
+resource "azurerm_mssql_database" "mssql_database" {
+  name         = "mssql_database"
+  server_id    = azurerm_mssql_server.mssql_server_1.id
+  collation    = "SQL_Latin1_General_CP1_CI_AS"   #specifies collation of DV, affects how string comparison is performed
+  license_type = "LicenseIncluded"                #specifies how sql server license is handled, LicenseIncluded mean the cost is included in azure sql database pricing
+  max_size_gb  = 2
+  sku_name     = "S0"                             #defines pricing tier
+  enclave_type = "VBS"                            #database will use virtualization based SECURITY
+
+  tags = {
+    environment = local.staging_env
+  }
+
+  # prevent the possibility of accidental data loss
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [ azurerm_mssql_server.mssql_server_1 ]
+}
+#firewall for mssql_database
+resource "azurerm_mssql_firewall_rule" "mssql_firewall_rule1" {
+  name             = "FirewallRule1"
+  server_id        = azurerm_mssql_server.mssql_server_1.id
+  start_ip_address = "4.34.67.180"
+  end_ip_address   = "4.34.67.180"
 }
