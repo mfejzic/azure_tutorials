@@ -92,7 +92,7 @@ resource "azurerm_subnet" "subnet1" {
   resource_group_name  = azurerm_resource_group.main_RG.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = [local.subnets[3].address_prefixes]
-  service_endpoints = ["Microsoft.Storage"]
+  service_endpoints = ["Microsoft.Sql"]                                             # remote into database from virtual machine
 }
 resource "azurerm_subnet" "subnet2" {
   name                 = local.subnets[4].name
@@ -881,7 +881,7 @@ resource "azurerm_windows_web_app" "windows_web_app1" {
 #   branch   = "master"
 # }
 
-# ------------------------------------- web app logging -------------------------------------#
+# ------------------------------------- web app logging ------------------------------------- #
 
 resource "azurerm_storage_account" "web_app_logging" {
   name                     = "mf37webapplogging"
@@ -951,11 +951,11 @@ resource "azurerm_web_app_active_slot" "active_slot" {
 
 }
 
-# ------------------------------------- log analytics & application insights -------------------------------------#
+# ------------------------------------- log analytics & application insights for web app-------------------------------------#
 
 #before enabling application insights, you must have log analystics workspace in place
-resource "azurerm_log_analytics_workspace" "log_analytics_workspace" {
-  name                = "log-analytics-1"
+resource "azurerm_log_analytics_workspace" "log_analytics_workspace_webapp" {
+  name                = "analytics-webapp"
   location            = "eastus2"
   resource_group_name = azurerm_resource_group.main_RG.name
   sku                 = "PerGB2018"                                # defines pricing tier - perGB2018 means you pay for the data ingested
@@ -967,9 +967,9 @@ resource "azurerm_application_insights" "application_insights" {
   location            = "eastus2"
   resource_group_name = azurerm_resource_group.main_RG.name
   application_type    = "web"                                      # indicates type of application being monitored
-  workspace_id = azurerm_log_analytics_workspace.log_analytics_workspace.id
+  workspace_id = azurerm_log_analytics_workspace.log_analytics_workspace_webapp.id
 
-  depends_on = [ azurerm_log_analytics_workspace.log_analytics_workspace ]
+  depends_on = [ azurerm_log_analytics_workspace.log_analytics_workspace_webapp ]
 }
 
 # ------------------------------------- sql database and server -------------------------------------#
@@ -988,6 +988,7 @@ resource "azurerm_mssql_server" "mssql_server_1" {
   }
 }
 
+# connect database on main vm
 resource "azurerm_mssql_database" "mssql_database" {
   name         = "mssql_database"
   server_id    = azurerm_mssql_server.mssql_server_1.id
@@ -1002,8 +1003,12 @@ resource "azurerm_mssql_database" "mssql_database" {
   }
 
   # prevent the possibility of accidental data loss
-  lifecycle {
-    prevent_destroy = true
+  # lifecycle {
+  #   prevent_destroy = true
+  # }
+
+  lifecycle {                                                          # specifies certain attributes terraform should ignore during updates or refreshes - if license type of database changes, terraform will not update or recreate the database
+    ignore_changes = [ license_type ]
   }
 
   depends_on = [ azurerm_mssql_server.mssql_server_1 ]
@@ -1015,3 +1020,46 @@ resource "azurerm_mssql_firewall_rule" "mssql_firewall_rule1" {
   start_ip_address = "4.34.67.180"
   end_ip_address   = "4.34.67.180"
 }
+
+# 
+resource "azurerm_mssql_virtual_network_rule" "mssql_vnet_rule1" {
+  name      = "sql-vnet-rule"
+  server_id = azurerm_mssql_server.mssql_server_1.id
+  subnet_id = azurerm_subnet.subnet1.id
+}
+
+# ------------------------------------- log analytics for sql database -------------------------------------#
+
+# ! diagnostics = collecting data ---> log analysis = analyzing data !
+#create ACR log and workspace -> enable auditing policy for the ACR SQL DB -> enable the diagnostic setting of the SQL DB so it can send data into the log and workspace
+resource "azurerm_log_analytics_workspace" "log_analytics_workspace_sqldb" {                                   # collects performance data from resources - this one is collecting data from the sql DB
+  name                = "acctest-01"
+  location            = "eastus"
+  resource_group_name = azurerm_resource_group.main_RG.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+resource "azurerm_mssql_database_extended_auditing_policy" "auditing_poilcy_sqldb" {
+  database_id                             = azurerm_mssql_database.mssql_database.id
+  log_monitoring_enabled = true                                                                                  # sends logs and metrics to log analystics
+  # storage_endpoint                        = azurerm_storage_account.example.primary_blob_endpoint              # points to which blob you want to store the audit logs in
+  # storage_account_access_key              = azurerm_storage_account.example.primary_access_key                 # authenticates access to storage account
+  # storage_account_access_key_is_secondary = false
+  #retention_in_days                       = 6
+}
+
+resource "azurerm_monitor_diagnostic_setting" "diagnostic_sqldb" {                                               # collection of detailed metrics - you can send this data to storage accounts, log analysis, event hubs, etc
+  name               = "monitor-diagnostic-settings"
+  target_resource_id = azurerm_mssql_database.mssql_database.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.log_analytics_workspace_sqldb.id
+
+  enabled_log {
+    category = "SQLSecurityAuditEvents"
+  }
+
+  metric {
+    category = "AllMetrics"
+  }
+}
+
