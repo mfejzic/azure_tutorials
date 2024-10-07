@@ -317,11 +317,18 @@ resource "azurerm_windows_virtual_machine" "vm" {
     storage_account_type = "Standard_LRS"
   }
 
-  source_image_reference {
-    publisher = "MicrosoftWindowsServer"
-    offer     = "WindowsServer"
-    sku       = "2016-Datacenter"
-    version   = "latest"
+  # source_image_reference {
+  #   publisher = "MicrosoftWindowsServer"
+  #   offer     = "WindowsServer"
+  #   sku       = "2016-Datacenter"
+  #   version   = "latest"
+  # }
+
+    source_image_reference {
+    publisher = "MicrosoftSQLServer" #used to be Canonical
+    offer     = "sql2019-ws2019"
+    sku       = "sqldev"
+    version   = "15.0.220510"
   }
 
   depends_on = [ azurerm_network_interface.netInterface_1, azurerm_resource_group.main_RG, azurerm_key_vault_secret.KV_secret, azurerm_key_vault.KV]
@@ -511,16 +518,16 @@ resource "azurerm_network_security_group" "sg_1" {
   source_address_prefix      = "0.0.0.0/0"
   destination_address_prefix   = "*"
   }
-  security_rule {
-    name                       = "DenyHTTP"
-    priority                   = 100
-    direction                  = "Outbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "80"
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
+   security_rule {
+  name                       = "Allow-1433"
+  priority                    = 400
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "1433"
+  source_address_prefix      = "0.0.0.0/0"
+  destination_address_prefix   = "*"
   }
 
   tags = {
@@ -824,7 +831,7 @@ resource "azurerm_storage_container" "container_combo" {
 #   description = "prefix of storage account name"
 # }
 
-# ------------------------------------- app service -------------------------------------# ! comment out foreach VMs for more to prevent quota limit !
+# ------------------------------------- web app service -------------------------------------# ! comment out foreach VMs for more to prevent quota limit !
 
 // you can integrate web app to github
 resource "azurerm_service_plan" "company_plan" {
@@ -872,6 +879,11 @@ resource "azurerm_windows_web_app" "windows_web_app1" {
       name = "deny_all_traffic"
       priority = 100
     }
+  }
+  connection_string {                                                                                               # connect web app to database
+    name = "SQLConnection"
+    type = "SQLAzure"
+    value = "Data Source=tcp: ${azurerm_mssql_server.mssql_server_1.fully_qualified_domain_name},1433; Initial Catalog=${azurerm_mssql_database.mssql_database.name}; User Id=${azurerm_mssql_server.mssql_server_1.administrator_login}; Password'${azurerm_mssql_server.mssql_server_1.administrator_login_password}';"
   }
 }
 
@@ -1054,12 +1066,100 @@ resource "azurerm_monitor_diagnostic_setting" "diagnostic_sqldb" {              
   target_resource_id = azurerm_mssql_database.mssql_database.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.log_analytics_workspace_sqldb.id
 
-  enabled_log {
-    category = "SQLSecurityAuditEvents"
+  enabled_log {                                                                                                  # specify which log you want to capture                                                                      
+    category = "SQLSecurityAuditEvents"                                                                          # captures security related events - user access, permissions change, data access, failed logins
   }
 
   metric {
-    category = "AllMetrics"
+    category = "AllMetrics"                                                                                      # all available performance metrics will be collected
   }
 }
+
+# ------------------------------------- insert data in database -------------------------------------#
+
+# resource "null_resource" "database_setup" {
+#   provisioner "local-exec" {
+#     command = "sqlcmd -S ${azurerm_mssql_server.mssql_server_1.fully_qualified_domain_name} -U ${azurerm_mssql_server.mssql_server_1.administrator_login} -P ${azurerm_mssql_server.mssql_server_1.administrator_login_password} -d mssql_database -i 01.sql"
+#   }
+# }
+
+# resource "null_resource" "database_setup" {
+#   provisioner "local-exec" {
+#     command = <<EOT
+#   sqlcmd 
+#   -S ${azurerm_mssql_server.mssql_server_1.fully_qualified_domain_name} 
+#   -U ${azurerm_mssql_server.mssql_server_1.administrator_login} 
+#   -P ${azurerm_mssql_server.mssql_server_1.administrator_login_password} 
+#   -d ${azurerm_mssql_database.mssql_database.name}
+#   -i 01.sql
+# EOT
+#   }
+# }
+
+# ------------------------------------- build SQL server virtual machine -------------------------------------#
+# I chose the main VM to run the server database - use this block to provision the VM to run microsoft SQL server
+#  !  register < Microsoft.SqlVirtualMachine > in subscriptios -> resource providers before using this block  !
+#  !  allow traffic on port 1433 - add to your security group  !
+resource "azurerm_mssql_virtual_machine" "sql_vm1" {
+  virtual_machine_id               = azurerm_windows_virtual_machine.vm.id
+  sql_license_type                 = "PAYG"
+  sql_connectivity_port = 1433
+  sql_connectivity_type = "PUBLIC"
+  sql_connectivity_update_password = "Azure@345"
+  sql_connectivity_update_username = "sqladmin"
+}
+
+# ------------------------------------- add data to the SQL VM -------------------------------------#
+# create two blobs under the same container and storage account
+#   # blob1 will contain the scripts.ps1 file, blob2 will contain the 01.SQL file
+
+resource "azurerm_storage_account" "commands_SA" {
+  name                     = "mf37commands"
+  resource_group_name      = azurerm_resource_group.main_RG.name
+  location                 = "eastus2"
+  account_tier             = "Standard"
+  account_replication_type = "GRS"
+
+  tags = {
+    environment = local.staging_env
+  }
+}
+
+resource "azurerm_storage_container" "scripts_sql_container" {
+  name                  = "database-commands"
+  storage_account_name  = azurerm_storage_account.commands_SA.name
+  container_access_type = "private"
+}
+
+resource "azurerm_storage_blob" "scripts_blob" {
+  name                   = "scripts.ps1"
+  storage_account_name   = "mf37commands"
+  storage_container_name = "database-commands"
+  type                   = "Block"
+  source                 = "scripts.ps1"
+}
+resource "azurerm_storage_blob" "sql_blob" {
+  name                   = "01.sql"
+  storage_account_name   = "mf37commands"
+  storage_container_name = "database-commands"
+  type                   = "Block"
+  source                 = "01.sql"
+}
+
+# resource "azurerm_virtual_machine_extension" "sqlvmextension" {
+#   name                 = "sqlvmextension"
+#   virtual_machine_id   = azurerm_windows_virtual_machine.vm.id
+#   publisher            = "Microsoft.Compute"
+#   type                 = "CustomScriptExtension"
+#   type_handler_version = "1.10"
+
+#   settings = <<SETTINGS
+#     {
+#         "fileUris": ["https://${azurerm_storage_account.commands_SA.name}.blob.core.windows.net/data/scripts.ps1"],
+#           "commandToExecute": "powershell -ExecutionPolicy Unrestricted -file scripts.ps1"     
+#     }
+# SETTINGS
+
+
+# }
 
