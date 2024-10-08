@@ -1109,7 +1109,7 @@ resource "azurerm_mssql_virtual_machine" "sql_vm1" {
   sql_connectivity_update_username = "sqladmin"
 }
 
-# ------------------------------------- add data to the SQL VM -------------------------------------#
+# ------------------------------------- add data to the SQL VM -------------------------------------#   !  scripts.ps1 contains a command to run 01.sql  !
 # create two blobs under the same container and storage account
 #   # blob1 will contain the scripts.ps1 file, blob2 will contain the 01.SQL file
 
@@ -1146,20 +1146,147 @@ resource "azurerm_storage_blob" "sql_blob" {
   source                 = "01.sql"
 }
 
-# resource "azurerm_virtual_machine_extension" "sqlvmextension" {
-#   name                 = "sqlvmextension"
-#   virtual_machine_id   = azurerm_windows_virtual_machine.vm.id
-#   publisher            = "Microsoft.Compute"
-#   type                 = "CustomScriptExtension"
-#   type_handler_version = "1.10"
+resource "azurerm_virtual_machine_extension" "sqlvmextension" {
+  name                 = "sqlvmextension"
+  virtual_machine_id   = azurerm_windows_virtual_machine.vm.id
+  publisher            = "Microsoft.Compute"
+  type                 = "CustomScriptExtension"
+  type_handler_version = "1.10"
 
-#   settings = <<SETTINGS
-#     {
-#         "fileUris": ["https://${azurerm_storage_account.commands_SA.name}.blob.core.windows.net/data/scripts.ps1"],
-#           "commandToExecute": "powershell -ExecutionPolicy Unrestricted -file scripts.ps1"     
-#     }
-# SETTINGS
+  settings = <<SETTINGS
+    {
+        "fileUris": ["https://${azurerm_storage_account.commands_SA.name}.blob.core.windows.net/database-commands/scripts.ps1"],
+          "commandToExecute": "powershell -ExecutionPolicy Unrestricted -file scripts.ps1"     
+    }
+SETTINGS
+}
 
 
+
+############################################################################################################################
+#                                              load balancing infrastructure                                               #
+############################################################################################################################
+#  !  new virtual network architecture for load balaning !
+
+# resource "azurerm_virtual_network" "vnet_lb" {
+#   name                = local.virtual_network.name
+#   location            = var.West_US 
+#   resource_group_name = azurerm_resource_group.main_RG.name
+#   address_space       = [local.virtual_network.address_space]
+# } 
+
+
+# resource "azurerm_subnet" "subnet_lb_1" {    
+#     name                 = "subnet_lb_1"
+#     resource_group_name  = azurerm_resource_group.main_RG.name
+#     virtual_network_name = azurerm_virtual_network.vnet_lb.name
+#     address_prefixes     = ["10.0.0.0/24"]
+#     depends_on = [
+#       azurerm_virtual_network.appnetwork
+#     ]
 # }
+
+# resource "azurerm_network_security_group" "appnsg" {
+#   name                = "LB-app-nsg"
+#   location            = var.West_US
+#   resource_group_name = azurerm_resource_group.main_RG.name
+
+#   security_rule {
+#     name                       = "AllowRDP"
+#     priority                   = 300
+#     direction                  = "Inbound"
+#     access                     = "Allow"
+#     protocol                   = "Tcp"
+#     source_port_range          = "*"
+#     destination_port_range     = "3389"
+#     source_address_prefix      = "*"
+#     destination_address_prefix = "*"
+#   }
+
+#   security_rule {
+#     name                       = "AllowHTTP"
+#     priority                   = 400
+#     direction                  = "Inbound"
+#     access                     = "Allow"
+#     protocol                   = "Tcp"
+#     source_port_range          = "*"
+#     destination_port_range     = "80"
+#     source_address_prefix      = "*"
+#     destination_address_prefix = "*"
+#   }
+
+# depends_on = [
+#     azurerm_virtual_network.appnetwork
+#   ]
+# }
+
+# resource "azurerm_subnet_network_security_group_association" "assoc_vnet_lb" {  
+#   subnet_id                 = azurerm_subnet.subnet_lb_1.id
+#   network_security_group_id = azurerm_network_security_group.appnsg.id
+
+#   depends_on = [
+#     azurerm_virtual_network.appnetwork,
+#   ]
+# }
+
+# resource "azurerm_network_interface" "lb_interface" {
+#   count=  var.number_of_machines
+#   name                = "lb-interface${count.index}"
+#   location            = var.West_US
+#   resource_group_name = azurerm_resource_group.main_RG.name
+
+#   ip_configuration {
+#     name                          = "internal"
+#     subnet_id                     = azurerm_subnet.subnet_lb_1.id
+#     private_ip_address_allocation = "Dynamic"    
+#   }
+
+#   depends_on = [
+#     azurerm_virtual_network.appnetwork
+#   ]
+# }
+
+
+# resource "azurerm_windows_virtual_machine" "appvm" {
+#   count=  var.number_of_machines
+#   name                = "LBvm${count.index}"
+#   resource_group_name = azurerm_resource_group.main_RG.name
+#   location            = var.West_US
+#   size                = "Standard_D2s_v3"
+#   admin_username      = "adminuser"
+#   admin_password      = "Azure@123"  
+#     availability_set_id = azurerm_availability_set.appset.id
+#     network_interface_ids = [
+#     azurerm_network_interface.appinterface[count.index].id,
+#   ]
+
+#   os_disk {
+#     caching              = "ReadWrite"
+#     storage_account_type = "Standard_LRS"
+#   }
+
+#   source_image_reference {
+#     publisher = "MicrosoftWindowsServer"
+#     offer     = "WindowsServer"
+#     sku       = "2019-Datacenter"
+#     version   = "latest"
+#   }
+#   depends_on = [
+#     azurerm_virtual_network.appnetwork,
+#     azurerm_network_interface.appinterface,
+#         azurerm_availability_set.appset
+#   ]
+# }
+
+# resource "azurerm_availability_set" "appset" {
+#   name                = "app-set"
+#   location            = var.West_US
+#   resource_group_name = azurerm_resource_group.main_RG.name
+#   platform_fault_domain_count = 3
+#   platform_update_domain_count = 3  
+#   depends_on = [
+#     azurerm_resource_group.appgrp
+#   ]
+# }
+
 
