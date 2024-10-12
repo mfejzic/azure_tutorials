@@ -1,3 +1,13 @@
+# config sets up a load balancing infrastructure by creating a resource group, vnet, static public IP for the load balancer, 
+# subnet defined with the VM to host network interfaces for mulitple VMs
+# the load balancer configured with backend address pool, distributes incoming traffic to the VMs
+# health probe pings the VM every five seconds, checking its fucntionality
+# includes DNS zone and A record for domain resolution
+# security groups control inbound and outbound traffic
+# storage account include blobs that store and manage scripts for VM configuration
+# setup includes both individual VMs and VM scaling 
+
+
 
 # ###########################################################################################################################
 #                                      load balancing infrastructure - individual VMs                                      #
@@ -316,8 +326,6 @@ resource "azurerm_windows_virtual_machine_scale_set" "appset" {
     load_balancer_backend_address_pool_ids=[azurerm_lb_backend_address_pool.scalesetpool.id]
   }
   }
-
-  
 
   depends_on = [
     azurerm_subnet.subnet_lb_1,    
