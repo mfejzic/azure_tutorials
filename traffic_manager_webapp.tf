@@ -1,3 +1,12 @@
+# this config sets up a web application involving the creation of a resource group, app service plan, web apps, traffic manager and custome hostname bindings
+# Two app service plans - one for each web app, a primary web app in the west US region with standard SKU, and a secondary web app in the east US region with basic SKU
+# both apps are configured to run on the .NET 6.0 stack
+# traffic manager is used to route traffic based on priority, primary has a priority of 1 while secondary has a priority of 2, if primary webapp fails, traffic manager will fallback to secondary webapp
+## traffic routing method can be changed to failover, performance, weighted, etc
+# custom hostname bindings are used to link the traffic manager's FQDN(fully qualified domain name) to their respective webapps 
+# the endpoints manage traffic distribution between the two web apps, if primary goes down, TM will automatically redirect traffic to the secondary webapp
+
+
 resource "azurerm_resource_group" "RG_webapp" {
   name = "webapp-RG"
   location = var.Central_US
