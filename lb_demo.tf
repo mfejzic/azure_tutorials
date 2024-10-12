@@ -169,8 +169,6 @@ resource "azurerm_storage_blob" "blob_script_ISSCONFIG" {
 }
 
 
-
-
 #---- security groups ----#
 resource "azurerm_network_security_group" "appnsg" {
   name                = "LB-app-nsg"
