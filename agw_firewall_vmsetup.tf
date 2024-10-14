@@ -1,3 +1,12 @@
+# this config sets up two VMs for handling images and video, each have extensions that execute powershell scripts
+# images VM has 2 cores while videos has 6 for more processing power
+# application gateway(agw) is configured with a static IP enabling path-based routing to the VMs based on the URL paths
+# storage account and containers hold the powershell scripts in a blob based storage
+# security groups allow inbound http and rdp traffic
+# configured with firewall, NAT and application rule collection to manage security and traffic routing
+# route table directs traffic to through the firewall 
+
+
 locals {
   function = ["videos", "images"]
 }
