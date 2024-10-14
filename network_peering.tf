@@ -1,3 +1,10 @@
+# creates two virtual networks, one for staging and one for testing, each have their own subnet
+# config establishes bi-directional peering between the two vnets
+# both vnets will provision virtual machines with security groups to manage inbound traffic and allow RDP access
+# storage accounts & containers are created for script stprage with a blob storing powershell scripts for the VMs
+
+
+
 locals {
   location= var.Central_US
   environment = {
