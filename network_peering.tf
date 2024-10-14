@@ -2,6 +2,7 @@
 # config establishes bi-directional peering between the two vnets
 # both vnets will provision virtual machines with security groups to manage inbound traffic and allow RDP access
 # storage accounts & containers are created for script stprage with a blob storing powershell scripts for the VMs
+# the scripts install IIS(internet information services) on the VM server and allow for and allow it to host websites
 
 
 
