@@ -94,12 +94,12 @@ resource "azurerm_virtual_machine_extension" "vmextension" {                    
   depends_on = [
     azurerm_storage_blob.IISConfig_blob
   ]                                                                                     # filesuri will point to the blobs that contain the scripts
-  settings = <<SETTINGS                                 
+  settings = <<SETTINGS
     {
         "fileUris": ["https://${azurerm_storage_account.storage_account.name}.blob.core.windows.net/${azurerm_storage_container.container.name}/IIS_Config_${each.key}.ps1"],
           "commandToExecute": "powershell -ExecutionPolicy Unrestricted -file IIS_Config_${each.key}.ps1"     
     }
-    SETTINGS
+SETTINGS
 
 }
 
@@ -254,7 +254,7 @@ resource "azurerm_subnet_network_security_group_association" "sg_assoc" {
 }
 
 ##############################################################################################################################
-#                                      storage account + container + blob                                   #
+#                                               storage account + container + blob                                           #
 ##############################################################################################################################
 
 # create a storage account
@@ -270,7 +270,7 @@ resource "azurerm_storage_account" "storage_account" {
   ]
 }
 
-#create a container 
+# create a container 
 resource "azurerm_storage_container" "container" {
   name                  = "scripts-data"
   storage_account_name  = azurerm_storage_account.storage_account.name
@@ -292,3 +292,121 @@ resource "azurerm_storage_blob" "IISConfig_blob" {
     azurerm_storage_account.storage_account]
 }
 
+
+##############################################################################################################################
+#                                                              FIREWALL                                                      #
+##############################################################################################################################
+
+# create a public IP used for firewall
+resource "azurerm_public_ip" "firewall_ip" {
+  name                = "firewall-ip"
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  location            = azurerm_resource_group.RG_AGW.location
+  allocation_method   = "Static"                                        # IP address will not change over time - Dynamic will change
+  sku = "Standard"                                                      # standard supports zone redundancy
+  sku_tier = "Regional"
+
+  depends_on = [ azurerm_resource_group.RG_AGW ]
+}
+
+resource "azurerm_subnet" "firewall_subnet" {
+  name                 = "AzureFirewallSubnet"
+  resource_group_name  = azurerm_resource_group.RG_AGW.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.0.2.0/24"]                                # allows 256 addresses
+}
+
+resource "azurerm_firewall" "firewall" {
+  name                = "firewall"
+  location            = azurerm_resource_group.RG_AGW.location
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  sku_name            = "AZFW_VNet"                                    # indicates its a virtual network firewall
+  sku_tier            = "Standard"                                     # standard performance
+  firewall_policy_id = azurerm_firewall_policy.firewall_policy.id
+
+  ip_configuration {
+    name                 = "configuration"
+    subnet_id            = azurerm_subnet.firewall_subnet.id           # links this firewall resource to its dedicated subnet
+    public_ip_address_id = azurerm_public_ip.firewall_ip.id            # links firewall to public IP
+    
+  }
+}
+
+# firewall policy contains various rules
+resource "azurerm_firewall_policy" "firewall_policy" {
+  name                = "firewall_policy"
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  location            = azurerm_resource_group.RG_AGW.location
+}
+
+# create multiple rule collections for firewall policy
+resource "azurerm_firewall_policy_rule_collection_group" "fwpolicy_rcg" {
+  for_each = toset(local.function)                                          # create 2 instances based on locals images/videos
+  name               = "fwpolicy-rcg"
+  firewall_policy_id = azurerm_firewall_policy.firewall_policy.id
+  priority           = 500
+
+  nat_rule_collection {                            # operates at NETWORK LAYER 3 managing IP address translations
+    name     = "nat_rule_collection1"
+    priority = 300
+    action   = "Dnat"                                                     # destination NAT(network address translation)
+    rule {
+        name = "allowrdp"
+        protocols = [ "TCP" ]                                              # RDP uses TCP for communication - only TCP packets will be processed by this rule
+        source_addresses = [ "0.0.0.0/0" ]
+        destination_address = "${azurerm_public_ip.firewall_ip.ip_address}"   # uses firewall public IP as destination - external clients will connect to this IP when using RDP service
+        destination_ports = [ "4000" ]                                        # the port that will receive traffic - use this port to RDP into vm and use images/video credentials
+        translated_address = "${azurerm_network_interface.interface[each.key].private_ip_address}"    # when traffic arrives to the firewall public IP, will be sent to these two private IP in subnetA - allowing their VMs to handle the connections
+        translated_port = "3389"                                             # the traffic being redirected to the private IPs above will be used for RDP
+    }
+  }
+
+ application_rule_collection {                   # operates at APPLICATION LAYER 7 focuses on web traffic and domains
+    name     = "app_rule_collection1"
+    priority = 600
+    action   = "Deny"
+    rule {
+      name = "allow-microsoft"
+      protocols {
+        type = "Http"
+        port = 80
+      }
+      protocols {
+        type = "Https"
+        port = 443
+      }
+      source_addresses  = ["${azurerm_network_interface.interface[each.key].private_ip_address}"]   # IP addresses allowed to initiate connections
+      destination_fqdns = ["www.microsoft.com"]                                                     # allows traffic to microsoft
+    }
+  }
+}
+
+######################################################################################################################
+#                                                       ROUTE TABLE                                                  #
+######################################################################################################################
+
+
+resource "azurerm_route_table" "route_table" {
+  name                = "route-table"
+  location            = azurerm_resource_group.RG_AGW.location
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  bgp_route_propagation_enabled = false                          # disbales border gateway protocol - use BGP in vnets for dynamic routing
+
+  depends_on = [ azurerm_resource_group.RG_AGW ]
+}
+
+resource "azurerm_route" "route_1" {
+  name                = "acceptanceTestRoute1"
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  route_table_name    = azurerm_route_table.route_table.name
+  address_prefix      = "0.0.0.0/0"
+  next_hop_type       = "VirtualAppliance"                                                # virtal appliance is a type of network device or service thats handles routing
+  next_hop_in_ip_address = azurerm_firewall.firewall.ip_configuration[0].private_ip_address
+
+  depends_on = [ azurerm_route_table.route_table ]
+}
+
+resource "azurerm_subnet_route_table_association" "RT_assoc" {
+  subnet_id      = azurerm_subnet.subnetA.id
+  route_table_id = azurerm_route_table.route_table.id
+}
