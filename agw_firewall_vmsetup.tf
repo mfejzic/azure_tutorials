@@ -6,6 +6,7 @@
 # configured with firewall, NAT and application rule collection to manage security and traffic routing
 # route table directs traffic to through the firewall 
 
+# add description for management lock & action group & metric/log alert - log analytics workspace $ vm extension/agent   
 
 locals {
   function = ["videos", "images"]
@@ -17,7 +18,7 @@ locals {
 
 # create a resource group
 resource "azurerm_resource_group" "RG_AGW" {
-    location = var.West_US
+    location = var.northeurope
     name = "resourcegroup-applicationgateway"  
 }
 
@@ -93,24 +94,24 @@ resource "azurerm_windows_virtual_machine" "vm" {
 }
 
 # one extension block will create an extension for each VM using the for_each attribute
-resource "azurerm_virtual_machine_extension" "vmextension" {                             # will execute powershell script on a VM 
-  for_each = toset(local.function)
-  name                 = "${each.key}-extension"
-  virtual_machine_id   = azurerm_windows_virtual_machine.vm[each.key].id
-  publisher            = "Microsoft.Compute"
-  type                 = "CustomScriptExtension"                                        # this type will handle the powershell scripts for the VMs
-  type_handler_version = "1.10"
-  depends_on = [
-    azurerm_storage_blob.IISConfig_blob
-  ]                                                                                     # filesuri will point to the blobs that contain the scripts
-  settings = <<SETTINGS
-    {
-        "fileUris": ["https://${azurerm_storage_account.storage_account.name}.blob.core.windows.net/${azurerm_storage_container.container.name}/IIS_Config_${each.key}.ps1"],
-          "commandToExecute": "powershell -ExecutionPolicy Unrestricted -file IIS_Config_${each.key}.ps1"     
-    }
-SETTINGS
+# resource "azurerm_virtual_machine_extension" "vmextension" {                             # will execute powershell script on a VM 
+#   for_each = toset(local.function)
+#   name                 = "${each.key}-extension"
+#   virtual_machine_id   = azurerm_windows_virtual_machine.vm[each.key].id
+#   publisher            = "Microsoft.Compute"
+#   type                 = "CustomScriptExtension"                                        # this type will handle the powershell scripts for the VMs
+#   type_handler_version = "1.10"
+#   depends_on = [
+#     azurerm_storage_blob.IISConfig_blob
+#   ]                                                                                     # filesuri will point to the blobs that contain the scripts
+#   settings = <<SETTINGS
+#     {
+#         "fileUris": ["https://${azurerm_storage_account.storage_account.name}.blob.core.windows.net/${azurerm_storage_container.container.name}/IIS_Config_${each.key}.ps1"],
+#           "commandToExecute": "powershell -ExecutionPolicy Unrestricted -file IIS_Config_${each.key}.ps1"     
+#     }
+# SETTINGS
 
-}
+# }
 
 ##############################################################################################################################
 #                                             application gateway + IP + subnet                                              #
@@ -418,4 +419,119 @@ resource "azurerm_route" "route_1" {
 resource "azurerm_subnet_route_table_association" "RT_assoc" {
   subnet_id      = azurerm_subnet.subnetA.id
   route_table_id = azurerm_route_table.route_table.id
+}
+
+######################################################################################################################
+#                                   management lock & action group & metric/log alert                                #
+######################################################################################################################
+
+# create a lock on your VM to read only
+resource "azurerm_management_lock" "resource-group-level" {                                       # go to subscription -> IAM role assignment -> assign user access management to terraform
+  for_each   = toset(local.function)
+  name       = "resource-group-level"
+  scope      = azurerm_windows_virtual_machine.vm[each.key].id                                    # scope is the ID of your virtual machine
+  lock_level = "ReadOnly"
+  notes      = "no changes can be made"
+}
+
+# create action group to notify your email
+resource "azurerm_monitor_action_group" "action_group" {
+  name                = "CriticalAlertsAction"
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  short_name          = "email-alerts"
+
+  email_receiver {
+    name          = "sendtoadmin"
+    email_address = "muhazic3@gmail.com"
+  } 
+}
+
+# create a m
+resource "azurerm_monitor_metric_alert" "networkout_alert" {
+  for_each = toset(local.function)
+  name                = "networkout-alert"
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  scopes              = [azurerm_windows_virtual_machine.vm[each.key].id]                       # targets for the alerts -> videos/images VMs
+  description         = "Action will be triggered when Transactions count is greater than 50."
+
+  criteria {
+    metric_namespace = "Microsoft.Compute/virtualMachines"                                       # this namespace included CPU usage, I/O traffic etc
+    metric_name      = "Network Out Total"                                                       # uses bytes - network out tracks ammount of data leaving the vm, in this case the VMs
+    aggregation      = "Total"                                                                   # other aggregation types are minimum, maximum, average
+    operator         = "GreaterThan"
+    threshold        = 70
+  }
+  action {
+    action_group_id = azurerm_monitor_action_group.action_group.id
+  }
+
+  depends_on = [ azurerm_windows_virtual_machine.vm, azurerm_monitor_action_group.action_group ]
+}
+
+resource "azurerm_monitor_activity_log_alert" "vm_operation" {
+  for_each = toset(local.function)
+  name                = "vm-log-alerts"
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  location            = azurerm_resource_group.RG_AGW.location
+  scopes              = [azurerm_resource_group.RG_AGW.id]
+  description         = "sends alert regarding vm deallocation"
+
+  criteria {
+    resource_id    = azurerm_windows_virtual_machine.vm[each.key].id
+    operation_name = "Microsoft.Compute/virtualMachines/deallocate/action"                      # alerts whenever a VM is deallocated, stopped or released from memory
+    category       = "Administrative"                                                           # admin category includes creating, modifying or deleting resources
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.action_group.id
+  }
+
+  depends_on = [ azurerm_windows_virtual_machine.vm, azurerm_monitor_action_group.action_group ]
+}
+
+
+######################################################################################################################
+#                                      log analytics workspace $ vm extension/agent                                  #
+######################################################################################################################
+
+resource "azurerm_log_analytics_workspace" "LAW" {
+  name                = "logs"
+  location            = azurerm_resource_group.RG_AGW.location
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+resource "azurerm_virtual_machine_extension" "vmagent" {
+  for_each = toset(local.function)
+  name                 = "vmagent"
+  virtual_machine_id   = azurerm_windows_virtual_machine.vm[each.key].id
+  publisher            = "Microsoft.EnterpriseCloud.Monitoring"
+  type                 = "MicrosoftMonitoringAgent"
+  type_handler_version = "1.0"
+  
+  auto_upgrade_minor_version = "true"
+  settings = <<SETTINGS
+    {
+      "workspaceId": "${azurerm_log_analytics_workspace.LAW.id}"
+    }
+SETTINGS
+   protected_settings = <<PROTECTED_SETTINGS
+   {
+      "workspaceKey": "${azurerm_log_analytics_workspace.LAW.primary_shared_key}"
+   }
+PROTECTED_SETTINGS
+
+depends_on = [
+  azurerm_log_analytics_workspace.LAW,
+  azurerm_windows_virtual_machine.vm
+]
+}
+
+resource "azurerm_log_analytics_datasource_windows_event" "system_events" {
+  name                = "system-events"
+  resource_group_name = azurerm_resource_group.RG_AGW.name
+  workspace_name      = azurerm_log_analytics_workspace.LAW.workspace_id
+  event_log_name      = "System"
+  event_types         = ["Information"]
 }
