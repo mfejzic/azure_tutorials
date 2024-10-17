@@ -94,24 +94,24 @@ resource "azurerm_windows_virtual_machine" "vm" {
 }
 
 # one extension block will create an extension for each VM using the for_each attribute
-# resource "azurerm_virtual_machine_extension" "vmextension" {                             # will execute powershell script on a VM 
-#   for_each = toset(local.function)
-#   name                 = "${each.key}-extension"
-#   virtual_machine_id   = azurerm_windows_virtual_machine.vm[each.key].id
-#   publisher            = "Microsoft.Compute"
-#   type                 = "CustomScriptExtension"                                        # this type will handle the powershell scripts for the VMs
-#   type_handler_version = "1.10"
-#   depends_on = [
-#     azurerm_storage_blob.IISConfig_blob
-#   ]                                                                                     # filesuri will point to the blobs that contain the scripts
-#   settings = <<SETTINGS
-#     {
-#         "fileUris": ["https://${azurerm_storage_account.storage_account.name}.blob.core.windows.net/${azurerm_storage_container.container.name}/IIS_Config_${each.key}.ps1"],
-#           "commandToExecute": "powershell -ExecutionPolicy Unrestricted -file IIS_Config_${each.key}.ps1"     
-#     }
-# SETTINGS
+resource "azurerm_virtual_machine_extension" "vmextension" {                             # will execute powershell script on a VM 
+  for_each = toset(local.function)
+  name                 = "${each.key}-extension"
+  virtual_machine_id   = azurerm_windows_virtual_machine.vm[each.key].id
+  publisher            = "Microsoft.Compute"
+  type                 = "CustomScriptExtension"                                        # this type will handle the powershell scripts for the VMs
+  type_handler_version = "1.10"
+  depends_on = [
+    azurerm_storage_blob.IISConfig_blob
+  ]                                                                                     # filesuri will point to the blobs that contain the scripts
+  settings = <<SETTINGS
+    {
+        "fileUris": ["https://${azurerm_storage_account.storage_account.name}.blob.core.windows.net/${azurerm_storage_container.container.name}/IIS_Config_${each.key}.ps1"],
+          "commandToExecute": "powershell -ExecutionPolicy Unrestricted -file IIS_Config_${each.key}.ps1"     
+    }
+SETTINGS
 
-# }
+}
 
 ##############################################################################################################################
 #                                             application gateway + IP + subnet                                              #
@@ -495,10 +495,10 @@ resource "azurerm_monitor_activity_log_alert" "vm_operation" {
 ######################################################################################################################
 
 resource "azurerm_log_analytics_workspace" "LAW" {
-  name                = "logs"
+  name                = "logs-mf37"
   location            = azurerm_resource_group.RG_AGW.location
-  resource_group_name = azurerm_resource_group.RG_AGW.name
-  sku                 = "PerGB2018"
+  resource_group_name = azurerm_resource_group.RG_AGW.name 
+  sku                 = "PerGB2018"                                                             # SKU determines billing, data retention and available features in this workspace
   retention_in_days   = 30
 }
 
@@ -506,15 +506,18 @@ resource "azurerm_virtual_machine_extension" "vmagent" {
   for_each = toset(local.function)
   name                 = "vmagent"
   virtual_machine_id   = azurerm_windows_virtual_machine.vm[each.key].id
-  publisher            = "Microsoft.EnterpriseCloud.Monitoring"
-  type                 = "MicrosoftMonitoringAgent"
+  publisher            = "Microsoft.EnterpriseCloud.Monitoring"                                # identifies the source for verifying authenticity and support
+  type                 = "MicrosoftMonitoringAgent"                                            # extension type being installed, in this case monitoring
   type_handler_version = "1.0"
   
-  auto_upgrade_minor_version = "true"
+  auto_upgrade_minor_version = "true"                                                          # indicates whether minor versions of the extension should auto upgrade, ensures that the extension 
+  
+  # workspaceID: connects agent to the log analysts workspace, enabling data collection
+  # protected settings: provides necessary credentils for the agent to authenticate with the LAW securely
   settings = <<SETTINGS
     {
-      "workspaceId": "${azurerm_log_analytics_workspace.LAW.id}"
-    }
+      "workspaceId": "${azurerm_log_analytics_workspace.LAW.id}"                               
+    } 
 SETTINGS
    protected_settings = <<PROTECTED_SETTINGS
    {
@@ -532,6 +535,6 @@ resource "azurerm_log_analytics_datasource_windows_event" "system_events" {
   name                = "system-events"
   resource_group_name = azurerm_resource_group.RG_AGW.name
   workspace_name      = azurerm_log_analytics_workspace.LAW.workspace_id
-  event_log_name      = "System"
-  event_types         = ["Information"]
+  event_log_name      = "System"                                                        # specifies which log source will be monitored, captures system events for analysis
+  event_types         = ["Information"]                                                 # only collects informational events from the system log
 }
