@@ -5,7 +5,11 @@
 # security groups allow inbound http and rdp traffic
 # configured with firewall, NAT and application rule collection to manage security and traffic routing
 # route table directs traffic to through the firewall 
-
+# creates read-only management lock on VMs to prevent any changes
+# the action group sends email notifications to the admin when specific events occur, like alerts related to network outage
+# metric alert is used to monitor network output which tirggers notifications if a total exceeds the threshold
+# activity log alert is set up to noitfy admin whenever a VM is deallocated 
+# the Log Analytics Workspace collects and analyzes log data. an extension is installed on each vm to faciliate this monitoring
 # add description for management lock & action group & metric/log alert - log analytics workspace $ vm extension/agent   
 
 locals {
