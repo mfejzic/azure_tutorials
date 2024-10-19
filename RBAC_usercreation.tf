@@ -1,3 +1,10 @@
+# configuration focuses on governance and access control
+# creates a mock user with designated principal name
+# assigns built in reader role to mock user, granting read only access to resources within resource group 
+# custom role is created to allow specific actions to virtual machines, which is assigned to mock user
+# policy is retrived from Azure that restricts resource creation in this resource group to ONLY virtual machines - all other resources cannot be created, unless allowed
+
+
 # create resource group
 resource "azurerm_resource_group" "user_RG" {
   name     = "user-resource-group"
