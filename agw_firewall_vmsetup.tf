@@ -12,7 +12,7 @@
 # metric alert is used to monitor network output which tirggers notifications if a total exceeds the threshold
 # activity log alert is set up to noitfy admin whenever a VM is deallocated 
 # the Log Analytics Workspace collects and analyzes log data. an extension is installed on each vm to faciliate this monitoring
-# add description for management lock & action group & metric/log alert - log analytics workspace $ vm extension/agent   
+
 
 locals {
   function = ["videos", "images"]
