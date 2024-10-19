@@ -1,3 +1,5 @@
+# !! DONT RUN TOO EXPENSIVE  !! #
+
 # this config sets up two VMs for handling images and video, each have extensions that execute powershell scripts
 # images VM has 2 cores while videos has 6 for more processing power
 # application gateway(agw) is configured with a static IP enabling path-based routing to the VMs based on the URL paths
