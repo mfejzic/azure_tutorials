@@ -519,7 +519,7 @@ resource "azurerm_virtual_machine_extension" "vmagent" {
   auto_upgrade_minor_version = "true"                                                          # indicates whether minor versions of the extension should auto upgrade, ensures that the extension 
   
   # workspaceID: connects agent to the log analysts workspace, enabling data collection
-  # protected settings: provides necessary credentils for the agent to authenticate with the LAW securely
+  # protected settings: provides necessary credentils for the agent to authenticate with the log analytics workspace securely
   settings = <<SETTINGS
     {
       "workspaceId": "${azurerm_log_analytics_workspace.LAW.id}"                               
