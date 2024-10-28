@@ -77,14 +77,14 @@ resource "azurerm_network_interface" "image_interface" {
     name                          = "internal"
     subnet_id                     = module.vnet.subnets["web-subnet"].id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id = azurerm_public_ip.image_publicip.id
+    public_ip_address_id          = azurerm_public_ip.image_publicip.id
   }
-  depends_on = [ module.vnet.main_vnet, azurerm_public_ip.image_publicip ]
+  depends_on = [module.vnet.main_vnet, azurerm_public_ip.image_publicip]
 }
 
 resource "azurerm_public_ip" "image_publicip" {
   name                = "image-publicip"
-  resource_group_name =local.resource_group_name
+  resource_group_name = local.resource_group_name
   location            = local.location
   allocation_method   = "Static"
 
@@ -97,10 +97,11 @@ resource "azurerm_public_ip" "image_publicip" {
 data "azurerm_shared_image" "image" {
   name                = "defineimage1"
   gallery_name        = "imagegallery"
-  resource_group_name = "new-grp"
+  resource_group_name = local.resource_group_name
+  depends_on = [ module.general_module.main_RG ]
 }
 
-# create a virtual machine from an image
+# create a virtual machine from the image
 resource "azurerm_virtual_machine" "webvm" {
   name                  = "web-vm"
   location              = local.location
@@ -117,5 +118,5 @@ resource "azurerm_virtual_machine" "webvm" {
     create_option     = "FromImage"
     managed_disk_type = "Standard_LRS"
   }
-  depends_on = [ azurerm_network_interface.image_interface, module.general_module.main_RG ]
+  depends_on = [azurerm_network_interface.image_interface, module.general_module.main_RG]
 }
