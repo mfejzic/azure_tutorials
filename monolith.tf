@@ -2,7 +2,7 @@
 # manually build a web server - create an image of that server
    # create 2019 windows datacenter vm
    # go to tools -> IIS manager -> webvm -> management service -> enable remote connection -> port should be 8172-> click on apply/start
-   # disable enhanced secuirty configuration and install the following - IIS - .net 6.0 - web deploy 3.6
+   # disable enhanced secuirty configuration and install the following - IIS - .net 6.0 ASP.NET Core Runtime 6.0.35 hosting bundle - web deploy amd64_en_US.msi
    # configure port 8172 - change dns name
 
 locals {
