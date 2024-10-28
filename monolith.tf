@@ -65,3 +65,57 @@ module "vnet" {
     "web-subnet" = "10.0.0.0/24"
     "db-subnet" = "10.0.1.0/24"
   } */
+
+
+
+resource "azurerm_network_interface" "image_interface" {
+  name                = "image-nic"
+  location            = local.location
+  resource_group_name = local.resource_group_name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = module.vnet.subnets["web-subnet"].id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id = azurerm_public_ip.image_publicip.id
+  }
+  depends_on = [ module.vnet.main_vnet, azurerm_public_ip.image_publicip ]
+}
+
+resource "azurerm_public_ip" "image_publicip" {
+  name                = "image-publicip"
+  resource_group_name =local.resource_group_name
+  location            = local.location
+  allocation_method   = "Static"
+
+  tags = {
+    environment = "Production"
+  }
+}
+
+# populate with name of image definition
+data "azurerm_shared_image" "image" {
+  name                = "appdefinition1"
+  gallery_name        = "appgallery"
+  resource_group_name = local.resource_group_name
+}
+
+# create a virtual machine from an image
+resource "azurerm_virtual_machine" "webvm" {
+  name                  = "web-vm"
+  location              = local.location
+  resource_group_name   = local.resource_group_name
+  network_interface_ids = [azurerm_network_interface.image_interface.id]
+  vm_size               = "Standard_DS1_v2"
+
+  storage_image_reference {
+    id = data.azurerm_shared_image.image.id
+  }
+  storage_os_disk {
+    name              = "myosdisk1"
+    caching           = "ReadWrite"
+    create_option     = "FromImage"
+    managed_disk_type = "Standard_LRS"
+  }
+  depends_on = [ azurerm_network_interface.image_interface, module.general_module.main_RG ]
+}
