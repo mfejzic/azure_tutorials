@@ -95,9 +95,9 @@ resource "azurerm_public_ip" "image_publicip" {
 
 # populate with name of image definition
 data "azurerm_shared_image" "image" {
-  name                = "appdefinition1"
-  gallery_name        = "appgallery"
-  resource_group_name = local.resource_group_name
+  name                = "defineimage1"
+  gallery_name        = "imagegallery"
+  resource_group_name = "new-grp"
 }
 
 # create a virtual machine from an image
