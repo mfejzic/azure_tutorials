@@ -1,7 +1,8 @@
 ## ! BIG STUFF HAPPENING ! ##
 # manually build a web server - create an image of that server
-  # go to tools -> IIS manager -> webvm -> management service -> enable remote connection -> port should be 8172-> click on apply/start
-  # disable enhanced secuirty configuration and install the following - IIS - .net 6.0 - web deploy 3.6
+   # create 2019 windows datacenter vm
+   # go to tools -> IIS manager -> webvm -> management service -> enable remote connection -> port should be 8172-> click on apply/start
+   # disable enhanced secuirty configuration and install the following - IIS - .net 6.0 - web deploy 3.6
 
 locals {
   resource_group_name = "main_resource_group"
