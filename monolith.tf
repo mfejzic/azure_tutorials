@@ -12,11 +12,15 @@ locals {
   }
 }
 
+# ------------------------------------- general module -------------------------------------#
+
 module "general_module" {
   source                  = "./monolith_modules/general"
   resource_group_name     = local.resource_group_name
   resource_group_location = local.location
 }
+
+# ------------------------------------- virtual network module -------------------------------------#
 
 module "vnet" {
   source              = "./monolith_modules/vnet"
@@ -66,6 +70,8 @@ module "vnet" {
   } */
 
 
+# ------------------------------------- database module -------------------------------------#
+
 module "compute" {
   source              = "./monolith_modules/compute"
   vnet_location       = local.location
@@ -89,6 +95,30 @@ module "compute" {
 
 }
 
+
+# ------------------------------------- storage account module -------------------------------------#
+
+module "storage_module" {
+    source = "./monolith_modules/storage"
+    vnet_location = local.location
+    resource_group_name = local.resource_group_name
+    SA_name = "mf37"
+    container_name = "data"
+    container_access = "blob"
+    blob_name = "script"
+    blobs = {
+        "01.sql" = "./tutorial/"
+        "scripts.ps1" = "./tutorial/"
+    }
+
+    depends_on = [ module.general_module ]
+}
+
+
+############################################################################################
+#                                  webserver virtual machine                               #
+############################################################################################
+
 resource "azurerm_mssql_virtual_machine" "mysql_vm" {
   virtual_machine_id               = module.compute.db_vm.id
   sql_license_type   = "PAYG"
@@ -98,7 +128,6 @@ resource "azurerm_mssql_virtual_machine" "mysql_vm" {
   sql_connectivity_type            = "PRIVATE"
 
 }
-
 
 resource "azurerm_network_interface" "image_interface" {
   name                = "image-nic"
