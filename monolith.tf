@@ -4,6 +4,8 @@
    # disable enhanced secuirty configuration and install the following - IIS - .net 6.0 ASP.NET Core Runtime 6.0.35 hosting bundle - web deploy amd64_en_US.msi
    # configure port 8172 - change dns name
 
+
+
 locals {
   resource_group_name = "main_resource_group"
   location            = "WESTUS"
@@ -98,20 +100,40 @@ module "compute" {
 
 # ------------------------------------- storage account module -------------------------------------#
 
+# adds storage account, container and a blob for each script
 module "storage_module" {
     source = "./monolith_modules/storage"
     vnet_location = local.location
     resource_group_name = local.resource_group_name
     SA_name = "mf37"
     container_name = "data"
+    app_container_name = "images"
     container_access = "blob"
     blob_name = "script"
     blobs = {
-        "01.sql" = "./tutorial/"
-        "scripts.ps1" = "./tutorial/"
+        "01.sql" = "01.sql"
+        "scripts.ps1" = "scripts.ps1"
     }
 
     depends_on = [ module.general_module ]
+}
+
+
+# ------------------------------------- custom script module -------------------------------------#
+
+# adds extension to database virtual machine
+module "customscript" {
+  source = "./monolith_modules/compute/customscript"
+  extension_name = "dbvm-extension"
+  virtual_machine_id = module.compute.db_vm.id
+  SA_name = "mf37"
+  container_name = "data"
+  extension_type = {
+    publisher            = "Microsoft.Compute"
+    type                 = "CustomScriptExtension"
+    type_handler_version = "1.10"
+  }
+  depends_on = [ module.compute, module.storage_module ]
 }
 
 
