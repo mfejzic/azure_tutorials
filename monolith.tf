@@ -185,12 +185,12 @@ data "azurerm_shared_image" "image" {
 }
 
 # create a virtual machine from the image
-resource "azurerm_virtual_machine" "webvm" {
+resource "azurerm_virtual_machine" "webvm" {                            # incompatible with trusted launch
   name                  = "web-vm"
   location              = local.location
   resource_group_name   = local.resource_group_name
   network_interface_ids = [azurerm_network_interface.image_interface.id]
-  vm_size               = "Standard_DS1_v2"
+  vm_size               = "Standard_DC2s_v2"
   
 
   storage_image_reference {
