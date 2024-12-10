@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            margin: 0px;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+                    header {
+                background-color: #3498db;
+                color: #fff;
+                text-align: center;
+                padding: 60px;
+            }
+
+            h1 {
+                font-size: 32px;
+                margin: 0;
+            }
+
+            .header-links {
+                margin-top: 10px;
+            }
+
+            .header-links a {
+                text-decoration: none;
+                color: #fff;
+                margin: 0 10px;
+                font-weight: bold;
+                transition: color 0.3s;
+            }
+
+            .header-links a:hover {
+                color: #e74c3c;
+            }
+
+            .header-links span {
+                color: #fff;
+            }
+            
+
+        .container {
+            display: flex;
+            align-items: center;
+            margin: 0;
+        }
+
+        .image-container {
+            flex: 1.2;
+            text-align: right;
+            margin-right: 50px;
+            
+        }
+        .resume-container {
+            flex: 1.2;
+            text-align: center;
+            margin-right: 50px;
+        }
+
+        img {
+            max-width: 100%;
+            max-height: 1300px; /* Default max-height */
+        }
+
+        .description-container {
+            flex: .9;
+            padding: 20px;
+            border: 7px solid #d8971e;
+        }
+
+        .javacode-container {
+            flex: .68;
+            padding: 20px;
+            border: 7px solid #8f1111;
+        }
+    
+        .javagif-container {
+            flex: .9;
+            padding: 20px;
+            text-align: center;
+        }
+
+        h2 {
+            font-size: 20px;
+            margin-top: 0;
+            list-style: disc; /* Add bullet points */
+            padding-left: 20px; /* Adjust the left padding for bullet points */
+        }
+
+        p {
+            font-size: 16px;
+        }
+
+        .divider {
+            border-top: 1px solid #ccc;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Welcome!</h1>
+        <div class="header-links">
+            <a href="https://github.com/mfejzic" target="_blank">GitHub</a>
+            <span>|</span>
+            <a href="https://www.linkedin.com/in/mfejzic/" target="_blank">LinkedIn</a>
+        </div>
+    </header>
+    <div class="divider"></div>
+    <div class="container">
+        <div class="description-container">
+            <a href="https://github.com/Muhazic/Cloudnet/tree/main/Cloudnet" target="_blank"></a>
+            <h3> Launch type: Non-serverless  |  Infrastructure size: Large  |  Security: High</h3> <div class="divider"></div>
+            <p>
+                <ul>
+                    <li>Virtual Private Cloud:
+                        VPC is created  in the US-East-1 and US-West-2 region.</li> <div class="divider"></div>
+                    <li>Network Access Control List:
+                        NACL is created and associated with each VPC, allowing or denying traffic in and out of subnets within the VPC.</li><div class="divider"></div>
+                    <li>Subnets and Gateways:
+                        Multiple public and private subnets are created across different Availability Zones in the region.
+                        An internet gateway and elastic IPs are created for network address translation gateways and placed in public subnets to provide external network access to private resources.</li><div class="divider"></div>
+                    <li>Security Groups:
+                        Security groups are defined for different purposes, such as allowing SSH access to a bastion host, allowing HTTP/HTTPS traffic for a load balancer, and controlling traffic to private instances.</li><div class="divider"></div>
+                    <li>Key Pairs and Instances:
+                        Key pairs are created for admin to SSH into EC2 instances. Amazon machine images are used to launch EC2 instances in public and private subnets automatically using data block.</li><div class="divider"></div>
+                    <li> Application Load Balancer and Auto Scaling:
+                        An Application Load Balancer is created to distribute incoming traffic to EC2 instances. Auto Scaling Groups are used to automatically adjust the number of EC2 instances based on demand.</li><div class="divider"></div>
+                    <li>Amazon S3 and Identity and Access Management (IAM):
+                        An Amazon S3 bucket is created, and objects are uploaded, with encryption and versioning enabled. IAM roles and policies are established to allow EC2 instances to access the S3 bucket securely and fetch static files. </li><div class="divider"></div>
+                    <li>CloudWatch and Simple Notification Service:
+                        CloudWatch alarms are set up to monitor S3 metrics, and alerts are sent through an SNS topic. </li><div class="divider"></div>
+                    <li>Route 53:
+                        I created route 53 to configure DNS records which implement failover policies and health checks for highly available access to resources in different regions. </li>
+                </ul>
+            </p>
+        </div>
+        <div class="image-container">
+            <a href="https://github.com/Muhazic/Cloudnet/tree/main/Cloudnet" target="_blank">
+                <img src="jpg/cloudnetOF.jpg" alt="Project 1">
+            </a>
+        </div>
+    </div>
+    <div class="divider"></div>
+    <div class="container">
+        <div class="description-container">
+            <h3>  Launch type: Serverless  |  Infrastructure size: Small  |  Security: Low</h3><div class="divider"></div>
+            <p>
+                <ul>
+                    <li>S3 Bucket:
+                        Creates an S3 bucket to store static website files. Enabled with server-side encryption for all objects using the AES256 algorithm and versioning to protect against accidental object deletion.</li><div class="divider"></div>
+                    <li>ACM Certificate:
+                        Uses data block to retrieve an ACM certificate for the domain, ensuring the most recent certificate with the type "AMAZON_ISSUED."</li><div class="divider"></div>
+                    <li>AWS CloudFront:
+                        Creates a CloudFront distribution to serve static web pages. Configures a TLS certificate from ACM for enhanced security.</li><div class="divider"></div>
+                    <li>Route 53:
+                        Uses data block to retrieve an existing Route 53 hosted zone for the domain. Creates primary and secondary DNS records for routing traffic to the CloudFront distribution. Implements health checks for the primary and secondary records to monitor their availability.</li>
+                </ul>
+            </p>
+        </div>
+        <div class="image-container">
+            <a href="https://github.com/mfejzic/Cloudfront" target="_blank">
+                <img src="jpg/cloudfront.jpg" alt="Project 1">
+            </a>
+        </div>
+    </div>
+    <div class="divider"></div>
+    <div class="container">
+        <div class="description-container">
+            <h3>  Launch type: Mixed  |  Infrastructure size: Medium  |  Security: Standard</h3>
+            <p>
+                <ul>
+                    <li>working on it</li>
+                    <li>working on it</li>
+                    <li>working on it</li>
+                    <li>working on it</li>
+                    <li>working on it</li>
+                </ul>
+            </p>
+        </div>
+        <div class="image-container">
+            <a href="" target="_blank">
+                <img src="jpg/mixed.jpg" alt="Project 1">
+            </a>
+        </div>
+    </div>
+    <div class="divider"></div>
+    <div class="container">
+        <div class="description-container">
+            <h3>  Launch type: Serverless  |  Infrastructure size: Large  |  Security: High </h3>
+            <p>
+                <ul>
+                    <li>Virtual Private Cloud:
+                        VPC is created  in the US-East-1 and US-West-2 region.</li> <div class="divider"></div>
+                        <li>Network Access Control List:
+                            NACL is created and associated with each VPC, allowing or denying traffic in and out of subnets within the VPC.</li><div class="divider"></div>
+                        <li>Subnets and Gateways:
+                            Multiple public and private subnets are created across different Availability Zones in the region.
+                            An internet gateway and elastic IPs are created for network address translation gateways and placed in public subnets to provide external network access to private resources.</li><div class="divider"></div>
+                    <li>Security Groups:
+                         Security groups are created for the load balancers and Fargate applications, controlling inbound and outbound traffic. The alb security group recieves traffic from the public internet and the fargate security group is configured to directly recieve traffic from the alb.</li><div class="divider"></div><div class="divider"></div>
+                    <li>Application Load Balancer and Target Group:
+                         Application Load Balancer is setup with the necessary properties and comes with a target group to deliver traffic to ecs containers.</li><div class="divider"></div>
+                    <li>DynamoDB and IAM Roles:
+                        The code creates a DynamoDB table for storing container details. It defines an IAM role for ECS tasks, allowing them to access DynamoDB, associates policies for accessing Amazon ECR repositories and creates a load balancer policy to ecs role.</li><div class="divider"></div>
+                    <li>CloudWatch Alarms and Simple Notification Service:
+                        I set up CloudWatch alarms to monitor ECS memory, CPU utilization and ALB request count. These alarms are configured to send notifications to an SNS topic, and an email subscription is created for this topic to receive notifications.</li><div class="divider"></div>
+                    <li>Route 53:
+                        I created route 53 to configure DNS records which implement failover policies and health checks for highly available access to resources in different regions. </li>
+                </ul>
+            </p>
+        </div>
+        <div class="image-container">
+            <a href="https://github.com/mfejzic/Fargate/tree/main/Fargate" target="_blank">
+                <img src="jpg/serverlessOF.jpg" alt="Project 1">
+            </a>
+        </div>
+    </div>
+    <div class="divider"></div>
+    <div class="container">
+        <div class ="javacode-container">
+            <h2>Tower of Hanoi - Java Project </h2><div class="divider"></div>
+            <p>
+                <ul>
+                    <li>User Input Validation:
+                        It continuously accepts user input for selecting the starting and target towers.The code validates user input to ensure they select valid tower options and that the target tower is different from the starting tower.</li><div class="divider"></div>
+                    <li>Tower Movement and Game Logic:
+                        It checks if the user can move a disk from the starting tower to the target tower based on the game rules. If a move is valid, it updates the tower configuration and counts the number of moves and provides feedback whether successful or not.</li><div class="divider"></div>
+                    <li>Winning Condition:
+                        The code checks if the user has successfully completed the Tower of Hanoi puzzle by moving all disks to another tower. If the win condition is met, it displays the total number of moves and ends the game.</li><div class="divider"></div>
+                    <li>Display of Tower State:
+                        The code continuously displays the current state of the three towers, showing the arrangement of disks.</li><div class="divider"></div>
+                     <li>Termination:
+                        The game continues to run until the user successfully completes the puzzle, after which it terminates.</li>
+                </ul>
+            </p>
+        </div>
+        <div class="javagif-container">
+            <a href="https://github.com/mfejzic/Data-Structures/blob/main/GameFinal/RunGame.java" target="_blank">
+                <img src="jpg/toigif.gif" alt="Project 1">
+            </a>
+        </div>
+    </div>
+    <div class="divider"></div>
+    <div class="container">
+        <div class="resume-container">
+            <img src="jpg/resume.jpg" alt="Image 5">
+        </div>
+    </div>
+    <div class="divider"></div>
+    <!-- Repeat the above structure for more images and descriptions -->
+</body>
+</html>
