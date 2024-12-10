@@ -1,0 +1,49 @@
+
+
+Latency Optimization: Front Door automatically uses the closest Edge Nodes to cache content and minimize latency, ensuring fast content delivery for static websites like HTML files.
+
+
+
+
+
+
+
+
+Azure Logic Apps:
+Logic Apps can help automate the synchronization process between your Storage Accounts. You can create a workflow where any time a new blob is added or an existing one is modified, it triggers the sync process.
+Steps to set up:
+Create a Logic App that monitors one of your storage accounts (e.g., US West).
+Whenever there is a change (new file or update), use Logic Apps connectors to copy the updated blob to the other regions’ storage accounts (e.g., US East 2, South Central).
+Example steps in Logic Apps:
+Trigger: When a new file is uploaded to Storage Account 1 (for example, in US West).
+Action: Copy the file to Storage Accounts 2 (US East 2) and 3 (South Central).
+
+
+Azure Functions:
+You can create an Azure Function to monitor a specific blob container and whenever there’s an update, the function will copy the file to the other regions’ Storage Accounts. This would involve using the Azure Blob Storage SDK to copy the files programmatically.
+This can be done by setting up an Event Grid trigger for blob changes and then writing logic in the function to sync the blobs to other storage accounts.
+
+
+2. Is There a Reason to Connect the Blobs?
+If you're aiming for high availability and low latency, you might want to keep blobs synchronized across all regions. This ensures that your static content is always available to users, no matter which region they are accessing the website from.
+
+
+
+
+In Diagnostics settings, ensure you have logging enabled for Read operations.
+You can use Azure Log Analytics to query the logs and extract the number of requests to your HTML blob.
+Using Azure Front Door / Application Insights:
+If you're using Azure Front Door for routing traffic, Azure Front Door Access Logs will capture all the incoming requests to your domain. This would allow you to track how many requests are made to your static content (even if it's cached by Front Door).
+
+Additionally, Azure Application Insights can track the client-side requests to your domain (e.g., page loads, resource requests). It will provide you with detailed analytics, such as:
+
+Number of page views.
+Number of sessions.
+User geography (where the request came from).
+Performance metrics.
+Front Door Access Logs (for tracking HTTP requests):
+If you're using Azure Front Door, the Front Door Access Logs will capture requests made to your website, including the following:
+
+Number of HTTP requests to your domain.
+Request origin (geographically, based on the user’s IP).
+Response time and status codes.
