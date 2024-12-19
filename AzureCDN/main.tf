@@ -1,56 +1,10 @@
-resource "azurerm_resource_group" "main_RG" {
-  name     = "main-resource-group"
-  location = "South Central US"
-}
+# resource "azurerm_resource_group" "main_RG" {
+#   name     = "main-resource-group"
+#   location = "South Central US"
+# }
 
-# ------------------------------------- South Central -------------------------------------#
-
-data "azurerm_storage_account" "southcentral" {
-  name                = azurerm_storage_account.SA_southcentral.name
-  resource_group_name = azurerm_resource_group.main_RG.name
-}
-
-resource "azurerm_storage_account" "SA_southcentral" {
-  name                     = "mf37southcentral"
-  resource_group_name      = azurerm_resource_group.main_RG.name
-  location                 = azurerm_resource_group.main_RG.location
-  account_tier             = "Standard"
-  account_replication_type = "GRS"
-
-  static_website {
-    index_document     = "index.html"
-    error_404_document = "error.html"
-  }
-
-  depends_on = [ azurerm_resource_group.main_RG ]
-
-  tags = {
-    environment = "staging"
-  }
-}
-
-resource "azurerm_storage_container" "southcentral_container" {
-  name                  = "master-blob"
-  storage_account_name = azurerm_storage_account.SA_southcentral.name
-  container_access_type = "blob"
-  
-  depends_on = [ azurerm_storage_account.SA_southcentral ]
-}
-
-resource "azurerm_storage_blob" "southcentral_blob" {
-  name                   = "index"
-  storage_account_name   = azurerm_storage_account.SA_southcentral.name
-  storage_container_name = azurerm_storage_container.southcentral_container.name
-  type                   = "Block"
-  source                 = "index.html"
-}
-
-resource "azurerm_storage_account_network_rules" "southcentral_logs" {
-  storage_account_id = azurerm_storage_account.SA_southcentral.id
-  
-  default_action             = "Allow"
-  ip_rules                   = ["0.0.0.0/0"]
-  bypass                     = ["Metrics"]
+data "azurerm_resource_group" "main_RG" {
+  name = "main"
 }
 
 
@@ -58,22 +12,20 @@ resource "azurerm_storage_account_network_rules" "southcentral_logs" {
 
 data "azurerm_storage_account" "westus" {
   name                = azurerm_storage_account.SA_west.name
-  resource_group_name = azurerm_resource_group.main_RG.name
+  resource_group_name = data.azurerm_resource_group.main_RG.name
 }
 
 resource "azurerm_storage_account" "SA_west" {
   name                     = "mf37west"
-  resource_group_name      = azurerm_resource_group.main_RG.name
+  resource_group_name      = data.azurerm_resource_group.main_RG.name
   location                 = "westus"
   account_tier             = "Standard"
-  account_replication_type = "GRS"
+  account_replication_type = "RAGRS"
 
   static_website {
     index_document     = "index.html"
     error_404_document = "error.html"
   }
-
-  depends_on = [ azurerm_resource_group.main_RG ]
 
   tags = {
     environment = "staging"
@@ -107,24 +59,22 @@ resource "azurerm_storage_account_network_rules" "west_logs" {
 
 # ------------------------------------- US East 2 -------------------------------------#
 
-data "azurerm_storage_account" "eastus2" {
+data "azurerm_storage_account" "SA_east" {
   name                = azurerm_storage_account.SA_east.name
-  resource_group_name = azurerm_resource_group.main_RG.name
+  resource_group_name = data.azurerm_resource_group.main_RG.name
 }
 
 resource "azurerm_storage_account" "SA_east" {
   name                     = "mf37east"
-  resource_group_name      = azurerm_resource_group.main_RG.name
+  resource_group_name      = data.azurerm_resource_group.main_RG.name
   location                 = "eastus2"
   account_tier             = "Standard"
-  account_replication_type = "GRS"
+  account_replication_type = "RAGRS"
 
   static_website {
     index_document     = "index.html"
     error_404_document = "error.html"
   }
-
-  depends_on = [ azurerm_resource_group.main_RG ]
 
   tags = {
     environment = "staging"
@@ -135,8 +85,6 @@ resource "azurerm_storage_container" "east_container" {
   name                  = "secondary-blob"
   storage_account_name = azurerm_storage_account.SA_east.name
   container_access_type = "blob"
-
-  depends_on = [ azurerm_storage_account.SA_east ]
 }
 
 resource "azurerm_storage_blob" "east_blob" {
@@ -155,6 +103,114 @@ resource "azurerm_storage_account_network_rules" "east_logs" {
   bypass                     = ["Metrics"]
 }
 
+
+# ------------------------------------- CDN profile & endpoints -------------------------------------#
+
+# Generate a random ID to append to the endpoint name
+resource "random_id" "random_id" {
+  byte_length = 8
+}
+
+# Create Azure CDN profile
+resource "azurerm_cdn_profile" "cdn_profile" {
+  name                = "cdn-profile"
+  resource_group_name = data.azurerm_resource_group.main_RG.name
+  location            = "Global"
+  sku = "Standard_Microsoft"
+}
+
+# Primary CDN Endpoint in US West (points to primary storage)
+resource "azurerm_cdn_endpoint" "primary_endpoint" {
+  name               = "primary-endpoint-${random_id.random_id.hex}"
+  profile_name       = azurerm_cdn_profile.cdn_profile.name
+  resource_group_name = data.azurerm_resource_group.main_RG.name
+  location = data.azurerm_resource_group.main_RG.location
+  optimization_type = "GeneralWebDelivery"
+  origin {
+    name      = "primary"
+    host_name = replace(replace(azurerm_storage_account.SA_west.primary_web_endpoint, "https://", ""), "/", "")    // use replace regex to remove the https:// and last slash from the host name - went from "https://mf37west.z22.web.core.windows.net/\ to mf37west.z22.web.core.windows.net/ 
+  }
+
+  depends_on = [ azurerm_cdn_profile.cdn_profile ]
+}
+
+# Secondary CDN Endpoint in US East (points to secondary storage)
+resource "azurerm_cdn_endpoint" "secondary_endpoint" {
+  name               = "secondary-endpoint-${random_id.random_id.hex}"
+  profile_name       = azurerm_cdn_profile.cdn_profile.name
+  resource_group_name = data.azurerm_resource_group.main_RG.name
+  location = data.azurerm_resource_group.main_RG.location
+  optimization_type = "GeneralWebDelivery"
+
+  origin {
+    name      = "secondary"
+    host_name = replace(replace(azurerm_storage_account.SA_east.primary_web_endpoint, "https://", ""), "/", "") // enable GRS or RA_GRS in storage account to use the secondary web endpoint as a backup!!! if stil facing issues with secondary, use primary until GRS propogates across regions
+  }
+
+  depends_on = [ azurerm_cdn_profile.cdn_profile, azurerm_cdn_endpoint.primary_endpoint ]
+}
+
+
+# ------------------------------------- Route53 -------------------------------------#
+
+# data "aws_route53_zone" "example_zone" {
+#   name = "www.fejzic37.com"  # Replace with your actual domain name managed in Route 53
+# }
+
+# # Primary CNAME Record (points to the Azure CDN endpoint for primary)
+# resource "aws_route53_record" "primary_cname" {
+#   zone_id = aws_route53_zone.example_zone.id
+#   name    = "www.yourdomain.com"  # Replace with your desired subdomain
+#   type    = "CNAME"
+#   ttl     = 60
+#   records = [
+#     "primary-endpoint.azureedge.net"  # Replace with your Azure primary CDN endpoint
+#   ]
+
+#   set_identifier = "primary"
+#   failover_routing_policy {
+#     type = "PRIMARY"
+#   }
+# }
+
+# # Secondary CNAME Record (points to the Azure CDN endpoint for secondary with failover)
+# resource "aws_route53_record" "secondary_cname" {
+#   zone_id = aws_route53_zone.example_zone.id
+#   name    = "www.yourdomain.com"  # Same as primary CNAME
+#   type    = "CNAME"
+#   ttl     = 60
+#   records = [
+#     "secondary-endpoint.azureedge.net"  # Replace with your Azure secondary CDN endpoint
+#   ]
+
+#   set_identifier = "secondary"
+#   failover_routing_policy {
+#     type = "SECONDARY"
+#   }
+# }
+
+# data "aws_route53_zone" "domain" {
+#   name         = "fejzic37.com"
+#   private_zone = false
+# }
+
+# resource "aws_route53_record" "primary_cname" {
+#   zone_id = data.aws_route53_zone.selected.zone_id
+#   name    = "www.${data.aws_route53_zone.domain.name}"
+#   type    = "CNAME"
+#   ttl     = "60"
+
+#   records = [azurerm_cdn_endpoint.primary_endpoint.name]
+# }
+
+# resource "aws_route53_record" "secondary_cname" {
+#   zone_id = data.aws_route53_zone.selected.zone_id
+#   name    = "www.${data.aws_route53_zone.domain.name}"
+#   type    = "CNAME"
+#   ttl     = "60"
+
+#   records = [azurerm_cdn_endpoint.primary_endpoint.name]
+# }
 
 # ------------------------------------- Log Analytics -------------------------------------#
 
@@ -184,151 +240,153 @@ resource "azurerm_storage_account_network_rules" "east_logs" {
 
 # ------------------------------------- DNS Zone -------------------------------------#
 
-resource "azurerm_dns_zone" "dnszone" {
-  name                = "www.fejzic37.com"
-  resource_group_name = azurerm_resource_group.main_RG.name
+# resource "azurerm_dns_zone" "dnszone" {
+#   name                = "www.fejzic37.com"
+#   resource_group_name = azurerm_resource_group.main_RG.name
 
-  depends_on = [ azurerm_resource_group.main_RG ]
-}
+#   depends_on = [ azurerm_resource_group.main_RG ]
+# }
 
-resource "azurerm_dns_cname_record" "cname" {
-  name                = "test"
-  zone_name           = azurerm_dns_zone.dnszone.name
-  resource_group_name = azurerm_resource_group.main_RG.name
-  ttl                 = 300
-  record              = azurerm_frontdoor.cdn.frontend_endpoint[0].host_name
+# resource "azurerm_dns_cname_record" "cname" {
+#   name                = "test"
+#   zone_name           = azurerm_dns_zone.dnszone.name
+#   resource_group_name = azurerm_resource_group.main_RG.name
+#   ttl                 = 300
+#   record              = azurerm_frontdoor.cdn.frontend_endpoint[0].host_name
 
-  depends_on = [ azurerm_resource_group.main_RG ]
-}
+#   depends_on = [ azurerm_resource_group.main_RG ]
+# }
 
-# ------------------------------------- Front Door CDN -------------------------------------#
+# # ------------------------------------- Front Door CDN -------------------------------------#
 
-resource "azurerm_frontdoor" "cdn" {
-  name                = "mf37frontdoor"
-  resource_group_name = azurerm_resource_group.main_RG.name
+# resource "azurerm_frontdoor" "cdn" {
+#   name                = "mf37frontdoor"
+#   resource_group_name = azurerm_resource_group.main_RG.name
 
-  frontend_endpoint {
-    name      = "front-endpoint"
-    host_name = "www.fejzic37.com"
-  }
+#   frontend_endpoint {
+#     name      = "front-endpoint"
+#     host_name = "www.fejzic37.com"
+#   }
 
-# ------------------------------------- South Central -------------------------------------#
-  routing_rule {
-    name               = "route-to-southcentral"
-    accepted_protocols = ["Https"]
-    patterns_to_match  = ["/sc/*"]                                    
-    frontend_endpoints = ["front-endpoint"]
+# # ------------------------------------- South Central -------------------------------------#
+#   routing_rule {
+#     name               = "route-to-southcentral"
+#     accepted_protocols = ["Https"]
+#     patterns_to_match  = ["/sc/*"]                                    
+#     frontend_endpoints = ["front-endpoint"]
 
-    forwarding_configuration {
-      forwarding_protocol = "MatchRequest"
-      backend_pool_name   = "backend-pool-southcentral"
-    }
-  }
+#     forwarding_configuration {
+#       forwarding_protocol = "MatchRequest"
+#       backend_pool_name   = "backend-pool-southcentral"
+#     }
+#   }
 
-  backend_pool {
-    name = "backend-pool-southcentral"
-    backend {
-      host_header = "www.fejzic37.com"     # Replace with your storage account's static website endpoint - may use data block?
-      address     = "www.fejzic37.com"
-      http_port   = 80
-      https_port  = 443
-    }
+#   backend_pool {
+#     name = "backend-pool-southcentral"
+#     backend {
+#       host_header = "www.fejzic37.com"     # Replace with your storage account's static website endpoint - may use data block?
+#       address     = "www.fejzic37.com"
+#       http_port   = 80
+#       https_port  = 443
+#     }
 
-    health_probe_name   = "southcentral-healthprobe"
-    load_balancing_name = "load-balancing"
-  }
+#     health_probe_name   = "southcentral-healthprobe"
+#     load_balancing_name = "load-balancing"
+#   }
 
-  backend_pool_health_probe {
-    name = "southcentral-healthprobe"
-    interval_in_seconds = 30
-    path = "/index.html"
-    protocol = "Https"
+#   backend_pool_health_probe {
+#     name = "southcentral-healthprobe"
+#     interval_in_seconds = 30
+#     path = "/index.html"
+#     protocol = "Https"
     
-  }
+#   }
 
-# ------------------------------------- US West -------------------------------------#
-  routing_rule {
-    name               = "route-to-west"
-    accepted_protocols = ["Https"]
-    patterns_to_match  = ["/west/*"]                                    # matches all URL's
-    frontend_endpoints = ["front-endpoint"]
+# # ------------------------------------- US West -------------------------------------#
+#   routing_rule {
+#     name               = "route-to-west"
+#     accepted_protocols = ["Https"]
+#     patterns_to_match  = ["/west/*"]                                    # matches all URL's
+#     frontend_endpoints = ["front-endpoint"]
 
-    forwarding_configuration {
-      forwarding_protocol = "MatchRequest"
-      backend_pool_name   = "backend-pool-west"
-    }
-  }
+#     forwarding_configuration {
+#       forwarding_protocol = "MatchRequest"
+#       backend_pool_name   = "backend-pool-west"
+#     }
+#   }
 
-  backend_pool {
-    name = "backend-pool-west"
-    backend {
-      host_header = "www.fejzic37.com"
-      address     = "www.fejzic37.com"
-      http_port   = 80
-      https_port  = 443
-    }
+#   backend_pool {
+#     name = "backend-pool-west"
+#     backend {
+#       host_header = "www.fejzic37.com"
+#       address     = "www.fejzic37.com"
+#       http_port   = 80
+#       https_port  = 443
+#     }
 
-    health_probe_name = "west-healthprobe"
-    load_balancing_name = "load-balancing"
-  }
+#     health_probe_name = "west-healthprobe"
+#     load_balancing_name = "load-balancing"
+#   }
 
-  backend_pool_health_probe {
-    name = "west-healthprobe"
-    interval_in_seconds = 30
-    path = "/index.html"
-    protocol = "Https"
-  }
+#   backend_pool_health_probe {
+#     name = "west-healthprobe"
+#     interval_in_seconds = 30
+#     path = "/index.html"
+#     protocol = "Https"
+#   }
 
-# ------------------------------------- US East 2 -------------------------------------#
-  routing_rule {
-    name               = "route-to-east"
-    accepted_protocols = ["Https"]
-    patterns_to_match  = ["/east/*"]                                    # matches all URL's
-    frontend_endpoints = ["front-endpoint"]
+# # ------------------------------------- US East 2 -------------------------------------#
+#   routing_rule {
+#     name               = "route-to-east"
+#     accepted_protocols = ["Https"]
+#     patterns_to_match  = ["/east/*"]                                    # matches all URL's
+#     frontend_endpoints = ["front-endpoint"]
 
-    forwarding_configuration {
-      forwarding_protocol = "MatchRequest"
-      backend_pool_name   = "backend-pool-east"
-    }
-  }
+#     forwarding_configuration {
+#       forwarding_protocol = "MatchRequest"
+#       backend_pool_name   = "backend-pool-east"
+#     }
+#   }
 
-  backend_pool {
-    name = "backend-pool-east"
-    backend {
-      host_header = "www.fejzic37.com"
-      address     = "www.fejzic37.com"
-      http_port   = 80
-      https_port  = 443
-    }
+#   backend_pool {
+#     name = "backend-pool-east"
+#     backend {
+#       host_header = "www.fejzic37.com"
+#       address     = "www.fejzic37.com"
+#       http_port   = 80
+#       https_port  = 443
+#     }
 
-    health_probe_name = "east-healthprobe"
-    load_balancing_name = "load-balancing"
+#     health_probe_name = "east-healthprobe"
+#     load_balancing_name = "load-balancing"
     
-  }
+#   }
 
-  backend_pool_health_probe {
-    name = "east-healthprobe"
-    interval_in_seconds = 30
-    path = "/index.html"
-    protocol = "Https"
-  }
-# ----------- backend load balancing -----------#
+#   backend_pool_health_probe {
+#     name = "east-healthprobe"
+#     interval_in_seconds = 30
+#     path = "/index.html"
+#     protocol = "Https"
+#   }
+# # ----------- backend load balancing -----------#
 
-  backend_pool_load_balancing {
-    name = "load-balancing"
-    sample_size           = 4           # The number of samples to consider
-    successful_samples_required = 2      # Number of successful samples needed
-    additional_latency_milliseconds = 0
-  }
+#   backend_pool_load_balancing {
+#     name = "load-balancing"
+#     sample_size           = 4           # The number of samples to consider
+#     successful_samples_required = 2      # Number of successful samples needed
+#     additional_latency_milliseconds = 0
+#   }
 
-  depends_on = [ 
-    azurerm_storage_account.SA_southcentral,  # Ensure the storage account in South Central is created first
-    azurerm_storage_account.SA_west,         # Ensure the storage account in US West is created first
-    azurerm_storage_account.SA_east,        # Ensure the storage account in US East 2 is created first
-    azurerm_resource_group.main_RG,
-    azurerm_dns_zone.dnszone,
- ]  
-}
+#   depends_on = [ 
+#     azurerm_storage_account.SA_southcentral,  # Ensure the storage account in South Central is created first
+#     azurerm_storage_account.SA_west,         # Ensure the storage account in US West is created first
+#     azurerm_storage_account.SA_east,        # Ensure the storage account in US East 2 is created first
+#     azurerm_resource_group.main_RG,
+#     azurerm_dns_zone.dnszone,
+#  ]  
+# }
+
+
 #  # add certificate
 # resource "azurerm_frontdoor_custom_https_configuration" "excustom_https" {
 #   frontend_endpoint_id              = azurerm_frontdoor.cdn.frontend_endpoints["front-endpoint"]
