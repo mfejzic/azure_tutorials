@@ -33,7 +33,7 @@ resource "azurerm_storage_account" "SA_west" {
 }
 
 resource "azurerm_storage_container" "west_container" {
-  name                  = "secondary-blob"
+  name                  = "primary-blob"
   storage_account_name = azurerm_storage_account.SA_west.name
   container_access_type = "blob"
 
@@ -41,11 +41,19 @@ resource "azurerm_storage_container" "west_container" {
 }
 
 resource "azurerm_storage_blob" "west_blob" {
-  name                   = "index"
+  name                   = "index.html"
   storage_account_name   = azurerm_storage_account.SA_west.name
   storage_container_name = azurerm_storage_container.west_container.name
   type                   = "Block"
   source                 = "index.html"
+}
+
+resource "azurerm_storage_blob" "west_error_blob" {
+  name                   = "error.html"
+  storage_account_name   = azurerm_storage_account.SA_west.name
+  storage_container_name = azurerm_storage_container.west_container.name
+  type                   = "Block"
+  source                 = "error.html"
 }
 
 resource "azurerm_storage_account_network_rules" "west_logs" {
@@ -88,11 +96,19 @@ resource "azurerm_storage_container" "east_container" {
 }
 
 resource "azurerm_storage_blob" "east_blob" {
-  name                   = "index"
+  name                   = "index.html"
   storage_account_name   = azurerm_storage_account.SA_east.name
   storage_container_name = azurerm_storage_container.east_container.name
   type                   = "Block"
   source                 = "index.html"
+}
+
+resource "azurerm_storage_blob" "east_error_blob" {
+  name                   = "error.html"
+  storage_account_name   = azurerm_storage_account.SA_east.name
+  storage_container_name = azurerm_storage_container.east_container.name
+  type                   = "Block"
+  source                 = "error.html"
 }
 
 resource "azurerm_storage_account_network_rules" "east_logs" {
@@ -126,6 +142,8 @@ resource "azurerm_cdn_endpoint" "primary_endpoint" {
   resource_group_name = data.azurerm_resource_group.main_RG.name
   location = data.azurerm_resource_group.main_RG.location
   optimization_type = "GeneralWebDelivery"
+  is_https_allowed = true
+  
   origin {
     name      = "primary"
     host_name = replace(replace(azurerm_storage_account.SA_west.primary_web_endpoint, "https://", ""), "/", "")    // use replace regex to remove the https:// and last slash from the host name - went from "https://mf37west.z22.web.core.windows.net/\ to mf37west.z22.web.core.windows.net/ 
@@ -139,63 +157,80 @@ resource "azurerm_cdn_endpoint" "secondary_endpoint" {
   name               = "secondary-endpoint-${random_id.random_id.hex}"
   profile_name       = azurerm_cdn_profile.cdn_profile.name
   resource_group_name = data.azurerm_resource_group.main_RG.name
-  location = data.azurerm_resource_group.main_RG.location
+  location = "EASTUS2"
   optimization_type = "GeneralWebDelivery"
 
   origin {
     name      = "secondary"
-    host_name = replace(replace(azurerm_storage_account.SA_east.primary_web_endpoint, "https://", ""), "/", "") // enable GRS or RA_GRS in storage account to use the secondary web endpoint as a backup!!! if stil facing issues with secondary, use primary until GRS propogates across regions
+    host_name = replace(replace(azurerm_storage_account.SA_east.secondary_web_endpoint, "https://", ""), "/", "") // enable GRS or RA_GRS in storage account to use the secondary web endpoint as a backup!!! if stil facing issues with secondary, use primary until GRS propogates across regions
   }
 
   depends_on = [ azurerm_cdn_profile.cdn_profile, azurerm_cdn_endpoint.primary_endpoint ]
 }
 
+# resource "azurerm_cdn_endpoint_custom_domain" "primary_endpoint_custom_domain" {
+#   name            = "domain"
+#   cdn_endpoint_id = azurerm_cdn_endpoint.primary_endpoint.id
+#   host_name       = "www.fejzic37.com"
+#   cdn_managed_https {
+#     certificate_type = "Shared"
+#     protocol_type = "IPBased"                                   // manually enable custom https on azure portal - no idea why im getting cert type not supported error
+#   }
+
+# #   depends_on = [ azurerm_cdn_endpoint.primary_endpoint ]
+# }
+
 
 # ------------------------------------- Route53 -------------------------------------#
 
-# data "aws_route53_zone" "example_zone" {
-#   name = "www.fejzic37.com"  # Replace with your actual domain name managed in Route 53
-# }
+data "aws_route53_zone" "hosted_zone" {
+  name = "fejzic37.com"  # Replace with your actual domain name managed in Route 53
+}
 
-# # Primary CNAME Record (points to the Azure CDN endpoint for primary)
+# Primary CNAME Record (points to the Azure CDN endpoint for primary)
+resource "aws_route53_record" "primary_cname" {
+  zone_id = data.aws_route53_zone.hosted_zone.id
+  name    = "www.${data.aws_route53_zone.hosted_zone.name}"
+  type    = "CNAME"
+  ttl     = 60
+  health_check_id = aws_route53_health_check.primary_health_check.id
+
+  records = [azurerm_cdn_endpoint.primary_endpoint.fqdn]
+
+  set_identifier = "primary"
+  failover_routing_policy {
+    type = "PRIMARY"
+  }
+}
+
+resource "aws_route53_health_check" "primary_health_check" {
+  fqdn = azurerm_cdn_endpoint.primary_endpoint.fqdn  # Your primary CDN endpoint
+
+  type = "HTTPS"
+  resource_path = "/index.html"
+  failure_threshold = 3
+  request_interval = 30
+  port = 443
+}
+
+# Secondary CNAME Record (points to the Azure CDN endpoint for secondary with failover)
+resource "aws_route53_record" "secondary_cname" {
+  zone_id = data.aws_route53_zone.hosted_zone.zone_id
+  name    = "www.${data.aws_route53_zone.hosted_zone.name}"
+  type    = "CNAME"
+  ttl     = 60
+  records = [azurerm_cdn_endpoint.secondary_endpoint.fqdn]
+
+  set_identifier = "secondary"
+  failover_routing_policy {
+    type = "SECONDARY"
+  }
+
+#   depends_on = [ azurerm_cdn_endpoint.primary_endpoint, aws_route53_record.primary_cname ]
+}
+
 # resource "aws_route53_record" "primary_cname" {
-#   zone_id = aws_route53_zone.example_zone.id
-#   name    = "www.yourdomain.com"  # Replace with your desired subdomain
-#   type    = "CNAME"
-#   ttl     = 60
-#   records = [
-#     "primary-endpoint.azureedge.net"  # Replace with your Azure primary CDN endpoint
-#   ]
-
-#   set_identifier = "primary"
-#   failover_routing_policy {
-#     type = "PRIMARY"
-#   }
-# }
-
-# # Secondary CNAME Record (points to the Azure CDN endpoint for secondary with failover)
-# resource "aws_route53_record" "secondary_cname" {
-#   zone_id = aws_route53_zone.example_zone.id
-#   name    = "www.yourdomain.com"  # Same as primary CNAME
-#   type    = "CNAME"
-#   ttl     = 60
-#   records = [
-#     "secondary-endpoint.azureedge.net"  # Replace with your Azure secondary CDN endpoint
-#   ]
-
-#   set_identifier = "secondary"
-#   failover_routing_policy {
-#     type = "SECONDARY"
-#   }
-# }
-
-# data "aws_route53_zone" "domain" {
-#   name         = "fejzic37.com"
-#   private_zone = false
-# }
-
-# resource "aws_route53_record" "primary_cname" {
-#   zone_id = data.aws_route53_zone.selected.zone_id
+#   zone_id = data.aws_route53_zone.dns_zone.zone_id
 #   name    = "www.${data.aws_route53_zone.domain.name}"
 #   type    = "CNAME"
 #   ttl     = "60"
@@ -204,12 +239,12 @@ resource "azurerm_cdn_endpoint" "secondary_endpoint" {
 # }
 
 # resource "aws_route53_record" "secondary_cname" {
-#   zone_id = data.aws_route53_zone.selected.zone_id
+#   zone_id = data.aws_route53_zone.dns_zone.zone_id
 #   name    = "www.${data.aws_route53_zone.domain.name}"
 #   type    = "CNAME"
 #   ttl     = "60"
 
-#   records = [azurerm_cdn_endpoint.primary_endpoint.name]
+#   records = [azurerm_cdn_endpoint.secondary_endpoint.name]
 # }
 
 # ------------------------------------- Log Analytics -------------------------------------#
