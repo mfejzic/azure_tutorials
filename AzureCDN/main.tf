@@ -22,20 +22,28 @@ resource "azurerm_storage_account" "SA_west" {
   account_tier             = "Standard"
   account_replication_type = "RAGRS"
 
-  static_website {
-    index_document     = "index.html"
-    error_404_document = "error.html"
-  }
+#   static_website {
+#     index_document     = "index.html"
+#     error_404_document = "error.html"
+#   }
 
   tags = {
     environment = "staging"
   }
 }
 
+resource "azurerm_storage_account_static_website" "SA_west_static_website" {
+  storage_account_id = azurerm_storage_account.SA_west.id
+  error_404_document = "error.html"
+  index_document     = "index.html"
+
+  depends_on = [azurerm_storage_account.SA_west]
+}
+
 resource "azurerm_storage_container" "west_container" {
-  name                  = "primary-blob"
-  storage_account_name = azurerm_storage_account.SA_west.name
+  name                  = "$web"
   container_access_type = "blob"
+  storage_account_name = azurerm_storage_account.SA_west.name
 
   depends_on = [ azurerm_storage_account.SA_west ]
 }
@@ -43,7 +51,7 @@ resource "azurerm_storage_container" "west_container" {
 resource "azurerm_storage_blob" "west_blob" {
   name                   = "index.html"
   storage_account_name   = azurerm_storage_account.SA_west.name
-  storage_container_name = azurerm_storage_container.west_container.name
+  storage_container_name = "$web"                                               // $web is created by default after enabling static website, its recommended to upload index.html in this container
   type                   = "Block"
   source                 = "index.html"
 }
@@ -51,7 +59,7 @@ resource "azurerm_storage_blob" "west_blob" {
 resource "azurerm_storage_blob" "west_error_blob" {
   name                   = "error.html"
   storage_account_name   = azurerm_storage_account.SA_west.name
-  storage_container_name = azurerm_storage_container.west_container.name
+  storage_container_name = "$web"
   type                   = "Block"
   source                 = "error.html"
 }
@@ -67,10 +75,10 @@ resource "azurerm_storage_account_network_rules" "west_logs" {
 
 # ------------------------------------- US East 2 -------------------------------------#
 
-data "azurerm_storage_account" "SA_east" {
-  name                = azurerm_storage_account.SA_east.name
-  resource_group_name = data.azurerm_resource_group.main_RG.name
-}
+# data "azurerm_storage_account" "SA_east" {
+#   name                = azurerm_storage_account.SA_east.name
+#   resource_group_name = data.azurerm_resource_group.main_RG.name
+# }
 
 resource "azurerm_storage_account" "SA_east" {
   name                     = "mf37east"
@@ -79,18 +87,26 @@ resource "azurerm_storage_account" "SA_east" {
   account_tier             = "Standard"
   account_replication_type = "RAGRS"
 
-  static_website {
-    index_document     = "index.html"
-    error_404_document = "error.html"
-  }
+#   static_website {
+#     index_document     = "index.html"
+#     error_404_document = "error.html"
+#   }
 
   tags = {
     environment = "staging"
   }
 }
 
+resource "azurerm_storage_account_static_website" "SA_east_static_website" {
+  storage_account_id = azurerm_storage_account.SA_east.id
+  error_404_document = "error.html"
+  index_document     = "index.html"
+
+  depends_on = [azurerm_storage_account.SA_east]
+}
+
 resource "azurerm_storage_container" "east_container" {
-  name                  = "secondary-blob"
+  name                  = "$web"
   storage_account_name = azurerm_storage_account.SA_east.name
   container_access_type = "blob"
 }
@@ -98,7 +114,7 @@ resource "azurerm_storage_container" "east_container" {
 resource "azurerm_storage_blob" "east_blob" {
   name                   = "index.html"
   storage_account_name   = azurerm_storage_account.SA_east.name
-  storage_container_name = azurerm_storage_container.east_container.name
+  storage_container_name = "$web"                                         // $web is created by default after enabling static website, its recommended to upload index.html in this container
   type                   = "Block"
   source                 = "index.html"
 }
@@ -106,7 +122,7 @@ resource "azurerm_storage_blob" "east_blob" {
 resource "azurerm_storage_blob" "east_error_blob" {
   name                   = "error.html"
   storage_account_name   = azurerm_storage_account.SA_east.name
-  storage_container_name = azurerm_storage_container.east_container.name
+  storage_container_name = "$web"
   type                   = "Block"
   source                 = "error.html"
 }
@@ -157,7 +173,7 @@ resource "azurerm_cdn_endpoint" "secondary_endpoint" {
   name               = "secondary-endpoint-${random_id.random_id.hex}"
   profile_name       = azurerm_cdn_profile.cdn_profile.name
   resource_group_name = data.azurerm_resource_group.main_RG.name
-  location = "EASTUS2"
+  location = "eastus2"
   optimization_type = "GeneralWebDelivery"
 
   origin {
@@ -174,7 +190,7 @@ resource "azurerm_cdn_endpoint" "secondary_endpoint" {
 #   host_name       = "www.fejzic37.com"
 #   cdn_managed_https {
 #     certificate_type = "Shared"
-#     protocol_type = "IPBased"                                   // manually enable custom https on azure portal - no idea why im getting cert type not supported error
+#     protocol_type = "IPBased"                                              // manually enable custom https on azure portal - no idea why im getting cert type not supported error
 #   }
 
 # #   depends_on = [ azurerm_cdn_endpoint.primary_endpoint ]
@@ -184,7 +200,7 @@ resource "azurerm_cdn_endpoint" "secondary_endpoint" {
 # ------------------------------------- Route53 -------------------------------------#
 
 data "aws_route53_zone" "hosted_zone" {
-  name = "fejzic37.com"  # Replace with your actual domain name managed in Route 53
+  name = "fejzic37.com"                                                          // your actual domain name managed in Route 53
 }
 
 # Primary CNAME Record (points to the Azure CDN endpoint for primary)
@@ -195,7 +211,7 @@ resource "aws_route53_record" "primary_cname" {
   ttl     = 60
   health_check_id = aws_route53_health_check.primary_health_check.id
 
-  records = [azurerm_cdn_endpoint.primary_endpoint.fqdn]
+  records = ["mf37west.z22.web.core.windows.net"]                                // or try azurerm_cdn_endpoint.secondary_endpoint.fqdn
 
   set_identifier = "primary"
   failover_routing_policy {
@@ -204,7 +220,7 @@ resource "aws_route53_record" "primary_cname" {
 }
 
 resource "aws_route53_health_check" "primary_health_check" {
-  fqdn = azurerm_cdn_endpoint.primary_endpoint.fqdn  # Your primary CDN endpoint
+  fqdn = azurerm_cdn_endpoint.primary_endpoint.fqdn                                          // Your primary CDN endpoint
 
   type = "HTTPS"
   resource_path = "/index.html"
@@ -214,20 +230,20 @@ resource "aws_route53_health_check" "primary_health_check" {
 }
 
 # Secondary CNAME Record (points to the Azure CDN endpoint for secondary with failover)
-resource "aws_route53_record" "secondary_cname" {
-  zone_id = data.aws_route53_zone.hosted_zone.zone_id
-  name    = "www.${data.aws_route53_zone.hosted_zone.name}"
-  type    = "CNAME"
-  ttl     = 60
-  records = [azurerm_cdn_endpoint.secondary_endpoint.fqdn]
+# resource "aws_route53_record" "secondary_cname" {
+#   zone_id = data.aws_route53_zone.hosted_zone.zone_id
+#   name    = "www.${data.aws_route53_zone.hosted_zone.name}"
+#   type    = "CNAME"
+#   ttl     = 60
+#   records = [azurerm_cdn_endpoint.secondary_endpoint.fqdn]
 
-  set_identifier = "secondary"
-  failover_routing_policy {
-    type = "SECONDARY"
-  }
+#   set_identifier = "secondary"
+#   failover_routing_policy {
+#     type = "SECONDARY"
+#   }
 
-#   depends_on = [ azurerm_cdn_endpoint.primary_endpoint, aws_route53_record.primary_cname ]
-}
+# #   depends_on = [ azurerm_cdn_endpoint.primary_endpoint, aws_route53_record.primary_cname ]
+# }
 
 # resource "aws_route53_record" "primary_cname" {
 #   zone_id = data.aws_route53_zone.dns_zone.zone_id
