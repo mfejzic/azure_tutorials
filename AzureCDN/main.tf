@@ -181,7 +181,7 @@ resource "azurerm_cdn_endpoint" "secondary_endpoint" {
     host_name = replace(replace(azurerm_storage_account.SA_east.secondary_web_endpoint, "https://", ""), "/", "") // enable GRS or RA_GRS in storage account to use the secondary web endpoint as a backup!!! if stil facing issues with secondary, use primary until GRS propogates across regions
   }
 
-  depends_on = [ azurerm_cdn_profile.cdn_profile, azurerm_cdn_endpoint.primary_endpoint ]
+  depends_on = [ azurerm_cdn_profile.cdn_profile /* add primary endpoint */]
 }
 
 # resource "azurerm_cdn_endpoint_custom_domain" "primary_endpoint_custom_domain" {
