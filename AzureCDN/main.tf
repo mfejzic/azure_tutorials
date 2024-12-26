@@ -7,10 +7,11 @@ data "azurerm_resource_group" "main_RG" {
   name = "main"
 }
 // 1. add custom domain to azure domain names, create txt record in route53 and add the value from azure domain names
-// 2. chnage access type to blob on each $web container
+// 2. manually change access type to blob on each $web container
 // 3. change blob content type to text/html
+// 4. may have to turn on tls cert manually
 
-// figure out which endpoint is best used for cname record
+// figure out which endpoint is best used for cname re
 # ------------------------------------- US West -------------------------------------#
 
 data "azurerm_storage_account" "westus" {
@@ -245,9 +246,10 @@ resource "azurerm_cdn_endpoint" "primary_endpoint" {
   
   origin {
     name      = "primary"
-    host_name = replace(replace(azurerm_storage_account.SA_west.primary_web_endpoint, "https://", ""), "/", "")    // use replace regex to remove the https:// and last slash from the host name - went from "https://mf37west.z22.web.core.windows.net/\ to mf37west.z22.web.core.windows.net/ 
+    //host_name = replace(replace(azurerm_storage_account.SA_west.primary_web_endpoint, "https://", ""), "/", "")    // use replace regex to remove the https:// and last slash from the host name - went from "https://mf37west.z22.web.core.windows.net/\ to mf37west.z22.web.core.windows.net/ 
     //host_name = azurerm_storage_account.SA_west.primary_blob_host
     //host_name = azurerm_storage_account.SA_west.primary_web_host
+    host_name = "www.fejzic37.com"
   }
 
   depends_on = [ azurerm_cdn_profile.cdn_profile, azurerm_storage_account.SA_west ]
@@ -293,10 +295,11 @@ resource "aws_route53_record" "primary_cname" {
   zone_id = data.aws_route53_zone.hosted_zone.id
   name    = "www.${data.aws_route53_zone.hosted_zone.name}"
   type    = "CNAME"
-  ttl     = 60
+  ttl     = 10
   health_check_id = aws_route53_health_check.primary_health_check.id
 
-  records = [azurerm_storage_account.SA_west.primary_web_host]                                // or try azurerm_cdn_endpoint.secondary_endpoint.fqdn - "mf37west.z22.web.core.windows.net"
+  records = ["www.fejzic37.com"]
+  //records = [azurerm_storage_account.SA_west.primary_web_host]                                // or try azurerm_cdn_endpoint.secondary_endpoint.fqdn - "mf37west.z22.web.core.windows.net"
 
   set_identifier = "primary"
   failover_routing_policy {
@@ -307,8 +310,12 @@ resource "aws_route53_record" "primary_cname" {
 resource "aws_route53_health_check" "primary_health_check" {
   //fqdn = azurerm_cdn_endpoint.primary_endpoint.fqdn                                          // Your primary CDN endpoint
    //fqdn = azurerm_storage_account.SA_west.primary_blob_endpoint
-   fqdn = "mf37west.z22.web.core.windows.net"
-  type = "HTTP"
+   //fqdn = "mf37west.z22.web.core.windows.net"
+   fqdn = "www.${data.aws_route53_zone.hosted_zone.name}"
+  type = "HTTPS"
+  //resource_path = "/index.html"
+  port = 443
+  
 }
 
 //Secondary CNAME Record (points to the Azure CDN endpoint for secondary with failover)
