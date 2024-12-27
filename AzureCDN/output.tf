@@ -35,3 +35,14 @@ output "primary_blob_endpoint" {
 output "primary_file_host" {
   value = azurerm_storage_account.SA_west.primary_file_host
 }
+output "primary_endpoint_custom_domain_name" {
+  value = azurerm_cdn_endpoint_custom_domain.primary_endpoint_custom_domain.name
+}
+output "primary_endpoint_custom_domain_host_name" {
+  value = azurerm_cdn_endpoint_custom_domain.primary_endpoint_custom_domain.host_name
+}
+output "azurerm_cdn_endpoint_primary_endpoint_fqdn" {
+  value = azurerm_cdn_endpoint.primary_endpoint.fqdn
+}
+
+
