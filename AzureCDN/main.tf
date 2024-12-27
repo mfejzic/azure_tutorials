@@ -1,9 +1,11 @@
 locals {
-  endpoint_log_categories = [
-    "CoreAnalytics",
+  storage_log_categories = [
+    "StorageRead",
+    "StorageDelete",
+    "StorageWrite"
   ]
   cdn_log_categories = [
-    "audit",
+    "AzureCdnAccessLog",
   ]
   jpg_files = [
     "cfbuild.jpg",
@@ -23,7 +25,9 @@ data "azurerm_resource_group" "main_RG" {
   name = "main"
 }
 
-
+// change diagnostics to storage accounts
+// check the lgos see if metrics are working
+// dones
 # ------------------------------------- US West -------------------------------------#
 
 #refer storage account if needed
@@ -96,7 +100,7 @@ resource "azurerm_storage_blob" "jpg_blobs_west" {
   storage_account_name  = azurerm_storage_account.SA_west.name
   storage_container_name = data.azurerm_storage_container.web_container_west.name
   type                  = "Block"
-  source                = "jpg/${each.value}"  # Local path to the JPG file
+  source                = "jpg/${each.value}"  //Local path to the JPG file
 
   content_type = each.value != null && (
     substr(each.value, length(each.value) - 3, 3) == "jpg" || 
@@ -215,14 +219,11 @@ resource "azurerm_log_analytics_workspace" "main_workspace" {
 # Enable diagnostic settings for Storage Account in US West
 resource "azurerm_monitor_diagnostic_setting" "west_diagnostic" {
   name               = "west-diagnostics"
-  target_resource_id = azurerm_cdn_endpoint.primary_endpoint.id
+  target_resource_id = azurerm_storage_account.SA_west.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main_workspace.id
 
-dynamic "enabled_log" {                                                  // references values from locals block
-    for_each = toset(local.endpoint_log_categories)                      // add additional log entries to locals block
-    content {
-      category = enabled_log.value
-    }
+  metric {
+    category = "AllMetrics"
   }
 
   depends_on = [ azurerm_log_analytics_workspace.main_workspace, azurerm_cdn_endpoint.primary_endpoint ]
@@ -231,14 +232,11 @@ dynamic "enabled_log" {                                                  // refe
 # Enable diagnostic settings for Storage Account in US East
 resource "azurerm_monitor_diagnostic_setting" "east_diagnostic" {
   name               = "east-diagnostics"
-  target_resource_id = azurerm_cdn_endpoint.secondary_endpoint.id
+  target_resource_id = azurerm_storage_account.SA_east.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main_workspace.id
 
-dynamic "enabled_log" {
-    for_each = toset(local.endpoint_log_categories)                   // add additional log entries to locals block
-    content {
-      category = enabled_log.value
-    }
+  metric {
+    category = "AllMetrics"
   }
 
   depends_on = [ azurerm_log_analytics_workspace.main_workspace, azurerm_cdn_endpoint.secondary_endpoint]
@@ -251,10 +249,18 @@ resource "azurerm_monitor_diagnostic_setting" "cdn" {                           
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main_workspace.id
   storage_account_id = azurerm_storage_account.SA_east.id                       // archives results in east storage account, incase of regional failure - workspace located in us west
 
+  dynamic "enabled_log" {                                                  // references values from locals block
+    for_each = toset(local.cdn_log_categories)                      // add additional log entries to locals block
+    content {
+      category = enabled_log.value
+    }
+  }
+
   metric {
     category = "AllMetrics"
   }
 }
+
 
 # ------------------------------------- CDN profile & endpoints -------------------------------------#
 
@@ -311,7 +317,7 @@ resource "azurerm_cdn_endpoint" "secondary_endpoint" {
     //host_name = azurerm_storage_account.SA_east.secondary_web_host                                             // use this if top one doesnt work
   }
 
-  depends_on = [ azurerm_cdn_profile.cdn_profile, azurerm_storage_account.SA_east /* add primary endpoint */]
+  depends_on = [ azurerm_cdn_profile.cdn_profile, azurerm_storage_account.SA_east, azurerm_cdn_endpoint.primary_endpoint /* add primary endpoint */]
 }
 
 resource "azurerm_cdn_endpoint_custom_domain" "primary_endpoint_custom_domain" {
@@ -323,7 +329,7 @@ resource "azurerm_cdn_endpoint_custom_domain" "primary_endpoint_custom_domain" {
 #     protocol_type = "IPBased"                                              // manually enable custom https on azure portal - no idea why im getting cert type not supported error
 #   }
 
-   depends_on = [ azurerm_cdn_endpoint.primary_endpoint ]
+   depends_on = [ azurerm_cdn_endpoint.primary_endpoint, aws_route53_record.primary_cname ]
 }
 
 # ------------------------------------- Route53 -------------------------------------#
