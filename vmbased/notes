@@ -1,0 +1,29 @@
+// for customers with predictable traffic and need control over servers, have legacy applications that cant run on serverless
+2. VM-Based E-Commerce Website with Azure and AWS Route 53
+Description: This architecture focuses on a more traditional setup for hosting an e-commerce platform on Azure Virtual Machines (VMs). It's ideal for businesses with predictable traffic, offering full control over the environment, which is crucial for applications that require custom server configurations or legacy systems. Azure services provide scalability, security, and high availability, while AWS Route 53 will manage DNS and traffic routing to ensure efficient and reliable access to the platform.
+
+Components:
+
+Azure:
+
+Azure Virtual Machines (VMs): Hosts the web and application servers, where the e-commerce platform is run (e.g., web, payment, and order processing).
+
+Azure SQL Database: A fully managed relational database to store e-commerce data such as orders, customer information, product catalog, etc. Supports high availability and scalability.
+
+Azure Virtual Network (VNet): Segments the infrastructure into public and private subnets. Public subnets handle traffic from the internet (e.g., Load Balancer), and private subnets contain backend systems such as the database and application servers that shouldn’t be exposed directly.
+
+Azure Load Balancer: Distributes incoming traffic evenly across multiple Azure VMs to ensure high availability, fault tolerance, and scalability.
+
+Azure Firewall: Provides centralized network protection, filtering traffic to and from the VMs, ensuring secure communication.
+
+Azure Security Center: A unified security management system to monitor and protect resources, identify potential vulnerabilities, and ensure compliance with security policies.
+
+AWS:
+
+Amazon Route 53: Manages DNS for the e-commerce website, routing traffic to the Azure Load Balancer. It provides DNS failover and health checks to ensure reliable access to the application. If one server or region becomes unavailable, Route 53 can automatically direct traffic to a healthy resource, ensuring minimal downtime.
+Why VM-Based?
+
+Provides complete control over the server environment, which is ideal for businesses that need to fine-tune their infrastructure or run legacy applications that aren't easily adaptable to serverless architectures.
+Predictable traffic makes it a suitable solution for businesses that prefer to manage their own scaling, resource allocation, and configurations.
+The use of Azure Virtual Machines offers more flexibility than serverless computing, especially for businesses with custom software requirements or specific security policies.
+This solution leverages the best of both Azure for the core infrastructure and AWS Route 53 for DNS management and traffic routing, creating a scalable, secure, and highly available e-commerce platform.
