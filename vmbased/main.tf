@@ -1,17 +1,16 @@
-
 locals {
   zones = ["1", "2"]
 
   # zone 1: Public, Private (VM), Private (DB)
   subnets_zone1 = [
-    { name = "public-subnet-zone1", address_prefixes = "10.0.1.0/24" },
+    { name = "AzureBastionSubnet", address_prefixes = "10.0.1.0/24" },
     { name = "private-vm-subnet-zone1", address_prefixes = "10.0.2.0/24" },
     { name = "private-db-subnet-zone1", address_prefixes = "10.0.3.0/24" }
   ]
 
   # zone 2: Public, Private (VM), Private (DB)
   subnets_zone2 = [
-    { name = "public-subnet-zone2", address_prefixes = "10.0.4.0/24" },
+    { name = "AzureBastionSubnet", address_prefixes = "10.0.4.0/24" },
     { name = "private-vm-subnet-zone2", address_prefixes = "10.0.5.0/24" },
     { name = "private-db-subnet-zone2", address_prefixes = "10.0.6.0/24" }
   ]
@@ -49,7 +48,7 @@ resource "azurerm_subnet" "subnets_zone1" {
 #associate NAT Gateway to public subnet 1 - cannot be done dynamically
 resource "azurerm_subnet_nat_gateway_association" "nat_to_pubsub1" {
   subnet_id           = azurerm_subnet.subnets_zone1[0].id
-  nat_gateway_id      = azurerm_nat_gateway.nat_gateway["public-subnet-zone1"].id
+  nat_gateway_id      = azurerm_nat_gateway.nat_gateway["AzureBastionSubnet"].id
 }
 
 #----------------------- all zone 2 subnets ------------------------#
@@ -65,7 +64,7 @@ resource "azurerm_subnet" "subnets_zone2" {
 #associate NAT Gateway to public subnet 2 - cannot be done dynamically
 resource "azurerm_subnet_nat_gateway_association" "nat_to_pubsub2" {
   subnet_id           = azurerm_subnet.subnets_zone2[0].id
-  nat_gateway_id      = azurerm_nat_gateway.nat_gateway["public-subnet-zone2"].id
+  nat_gateway_id      = azurerm_nat_gateway.nat_gateway["AzureBastionSubnet"].id
 }
 
 #----------------------- NAT gateway & public IPs ------------------------#
@@ -108,7 +107,7 @@ resource "azurerm_route_table" "private_rt1" {
     name                   = "internet-access"                             // Route for internet access via NAT Gateway
     address_prefix         = var.all_cidr
     next_hop_type          = "VirtualAppliance"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
-    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat["public-subnet-zone1"].ip_address   //NAT Gateway for internet access
+    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat["AzureBastionSubnet"].ip_address   //NAT Gateway for internet access
   }
 }
 
@@ -134,7 +133,7 @@ resource "azurerm_route_table" "private_rt2" {
     name                   = "internet-access"                             // Route for internet access via NAT Gateway
     address_prefix         = var.all_cidr
     next_hop_type          = "VirtualAppliance"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
-    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat["public-subnet-zone2"].ip_address   //NAT Gateway for internet access
+    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat["AzureBastionSubnet"].ip_address   //NAT Gateway for internet access
   }
 }
 
@@ -149,6 +148,7 @@ resource "azurerm_subnet_route_table_association" "zone2_private_db_subnet_assoc
   route_table_id = azurerm_route_table.private_rt2.id
 }
 
+#----------------------------- security groups ------------------------------#
 
 # resource "azurerm_network_security_group" "bastion_nsg" {
 #   name                = "bastion-nsg"
@@ -240,21 +240,52 @@ resource "azurerm_subnet_route_table_association" "zone2_private_db_subnet_assoc
 #   }
 # }
 
+#---------------------------- bastion & IP -----------------------------#
 
-resource "azurerm_bastion_host" "bastion" {
-  for_each = toset(local.public_subnets)
-  name                     = "${each.value}-bastion"
+resource "azurerm_bastion_host" "bastion1" {
+  //for_each = toset(local.public_subnets)                                // 1 bastion per vnet
+  name                     = "bastion1"
   location                 = azurerm_resource_group.main.location
   resource_group_name      = azurerm_resource_group.main.name
-  virtual_network_id = azurerm_virtual_network.vnet.id                   // only supported when sku is developer
-  sku = "Developer"                                              
+  virtual_network_id = azurerm_virtual_network.vnet.id                   // only supported when sku is developer 
+  sku = "Developer"                                                      // use standard sku for production
+
+  ip_configuration {
+    name = "ip1"
+    public_ip_address_id = azurerm_public_ip.public_ip_bastion1.id
+    subnet_id = azurerm_subnet.subnets_zone1[0].id
+  }
 }
 
-resource "azurerm_public_ip" "public_ip_bastion" {
-  for_each            = toset(local.public_subnets)                         //Iterate over the public subnets
-  name                = "${each.value}-bastion-ip"
+resource "azurerm_public_ip" "public_ip_bastion1" {
+  //for_each            = toset(local.public_subnets)                         //Iterate over the public subnets
+  name                = "bastion-ip1"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   allocation_method   = "Static"
-  sku                 = "Standard"
+  //sku                 = "Standard"
 }
+
+# resource "azurerm_bastion_host" "bastion2" {
+#   //for_each = toset(local.public_subnets)                                // 1 bastion per vnet
+#   name                     = "bastion2"
+#   location                 = azurerm_resource_group.main.location
+#   resource_group_name      = azurerm_resource_group.main.name
+#   virtual_network_id = azurerm_virtual_network.vnet.id                   // only supported when sku is developer 
+#   sku = "Developer"                                                      // use standard sku for production
+
+#   ip_configuration {
+#     name = "ip"
+#     public_ip_address_id = azurerm_public_ip.public_ip_bastion.id
+#     subnet_id = azurerm_subnet.subnets_zone1[0].id
+#   }
+# }
+
+# resource "azurerm_public_ip" "public_ip_bastion2" {
+#   for_each            = toset(local.public_subnets)                         //Iterate over the public subnets
+#   name                = "${each.value}-bastion-ip"
+#   location            = azurerm_resource_group.main.location
+#   resource_group_name = azurerm_resource_group.main.name
+#   allocation_method   = "Static"
+#   sku                 = "Standard"
+# }
