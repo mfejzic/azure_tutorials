@@ -1,25 +1,25 @@
 locals {
   zones = ["1", "2"]
 
-  # zone 1: Public, Private (VM), Private (DB)
+  //zone 1: Public, Private (VM), Private (DB)
   subnets_zone1 = [
     { name = "AzureBastionSubnet", address_prefixes = "10.0.1.0/24" },
     { name = "private-vm-subnet-zone1", address_prefixes = "10.0.2.0/24" },
     { name = "private-db-subnet-zone1", address_prefixes = "10.0.3.0/24" }
   ]
 
-  # zone 2: Public, Private (VM), Private (DB)
+  //zone 2: Public, Private (VM), Private (DB)
   subnets_zone2 = [
     { name = "AzureBastionSubnet", address_prefixes = "10.0.4.0/24" },
     { name = "private-vm-subnet-zone2", address_prefixes = "10.0.5.0/24" },
     { name = "private-db-subnet-zone2", address_prefixes = "10.0.6.0/24" }
   ]
 
-  # Combine both zones' public subnets to create public IPs
+  //Combine both zones' public subnets to create public IPs
   public_subnets = flatten(concat([ 
-    for subnet in local.subnets_zone1 : subnet.name if substr(subnet.name, 0, 7) == "public-" 
+    for subnet in local.subnets_zone1 : subnet.name if substr(subnet.name, 0, 5) == "Azure" 
     ] , [ 
-    for subnet in local.subnets_zone2 : subnet.name if substr(subnet.name, 0, 7) == "public-" 
+    for subnet in local.subnets_zone2 : subnet.name if substr(subnet.name, 0, 5) == "Azure" 
     ]))
 }
 
@@ -43,14 +43,30 @@ resource "azurerm_subnet" "subnets_zone1" {
   resource_group_name = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes = [local.subnets_zone1[count.index].address_prefixes]
+
+  depends_on = [ azurerm_virtual_network.vnet ]
 }
 
-#associate NAT Gateway to public subnet 1 - cannot be done dynamically
+//associate NAT Gateway to public subnet 1 
 resource "azurerm_subnet_nat_gateway_association" "nat_to_pubsub1" {
   subnet_id           = azurerm_subnet.subnets_zone1[0].id
   nat_gateway_id      = azurerm_nat_gateway.nat_gateway["AzureBastionSubnet"].id
-}
 
+  depends_on = [ azurerm_subnet.subnets_zone1, azurerm_nat_gateway.nat_gateway ]        // needs zone 1 subnets and NAT gateway
+}
+#----------------------- NAT gateway & public IPs ------------------------#
+
+//block creates 2 NAT Gateways for each public subnet
+resource "azurerm_nat_gateway" "nat_gateway" {
+  for_each            = toset(local.public_subnets)
+  name                = "${each.value}-nat-gateway"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  //zones               = each.value == "public-subnet-zone1" ? ["1"] : ["2"]       //assign NAT Gateway to a each zone
+
+  depends_on = [ azurerm_virtual_network.vnet ]
+  
+}
 #----------------------- all zone 2 subnets ------------------------#
 
 resource "azurerm_subnet" "subnets_zone2" {
@@ -59,23 +75,30 @@ resource "azurerm_subnet" "subnets_zone2" {
   resource_group_name = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes =[local.subnets_zone2[count.index].address_prefixes]
+
+  depends_on = [ azurerm_virtual_network.vnet ]
 }
 
-#associate NAT Gateway to public subnet 2 - cannot be done dynamically
+#associate NAT Gateway to public subnet 2
 resource "azurerm_subnet_nat_gateway_association" "nat_to_pubsub2" {
   subnet_id           = azurerm_subnet.subnets_zone2[0].id
   nat_gateway_id      = azurerm_nat_gateway.nat_gateway["AzureBastionSubnet"].id
+
+  depends_on = [ azurerm_subnet.subnets_zone2, azurerm_nat_gateway.nat_gateway ]     // needs zone 2 subnets and NAT gateway
 }
 
 #----------------------- NAT gateway & public IPs ------------------------#
 
-# Create 2 NAT Gateways for each public subnet
-resource "azurerm_nat_gateway" "nat_gateway" {
+//block creates 2 NAT Gateways for each public subnet
+resource "azurerm_nat_gateway" "nat_gateway" {                                  //delete
   for_each            = toset(local.public_subnets)
   name                = "${each.value}-nat-gateway"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   //zones               = each.value == "public-subnet-zone1" ? ["1"] : ["2"]       //assign NAT Gateway to a each zone
+
+  depends_on = [ azurerm_virtual_network.vnet ]
+  
 }
 
 # Create 2 Elastic IPs for each public subnet
@@ -87,13 +110,17 @@ resource "azurerm_public_ip" "public_ip_nat" {
   allocation_method   = "Static"
   sku                  = "Standard"
   //zones               = each.value == "public-subnet-zone1" ? ["1"] : ["2"]     //assigning the IP to a each zone (zone 1 for public-subnet-zone1, zone 2 for public-subnet-zone2)
+
+  depends_on = [ azurerm_virtual_network.vnet ]
 }
 
 # associate NAT Gateways with Public IPs
 resource "azurerm_nat_gateway_public_ip_association" "nat_to_ip_association" {
-  for_each            = toset(local.public_subnets)
+  for_each            = toset(local.public_subnets)                                      //???
   nat_gateway_id      = azurerm_nat_gateway.nat_gateway[each.value].id
   public_ip_address_id = azurerm_public_ip.public_ip_nat[each.value].id
+
+  depends_on = [ azurerm_public_ip.public_ip_nat, azurerm_nat_gateway.nat_gateway ]
 }
 
 #----------------------- route table for zone 1 ------------------------#
@@ -109,6 +136,8 @@ resource "azurerm_route_table" "private_rt1" {
     next_hop_type          = "VirtualAppliance"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
     next_hop_in_ip_address = azurerm_public_ip.public_ip_nat["AzureBastionSubnet"].ip_address   //NAT Gateway for internet access
   }
+
+  depends_on = [ azurerm_public_ip.public_ip_nat, azurerm_nat_gateway.nat_gateway ]
 }
 
 #------- route table associations --------#
@@ -130,11 +159,13 @@ resource "azurerm_route_table" "private_rt2" {
   resource_group_name = azurerm_resource_group.main.name
 
   route {
-    name                   = "internet-access"                             // Route for internet access via NAT Gateway
+    name                   = "internet-access"                             // Route to internet via NAT Gateway
     address_prefix         = var.all_cidr
     next_hop_type          = "VirtualAppliance"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
     next_hop_in_ip_address = azurerm_public_ip.public_ip_nat["AzureBastionSubnet"].ip_address   //NAT Gateway for internet access
   }
+
+  depends_on = [ azurerm_public_ip.public_ip_nat, azurerm_nat_gateway.nat_gateway ]
 }
 
 #------- route table associations --------#
@@ -247,8 +278,8 @@ resource "azurerm_bastion_host" "bastion1" {
   name                     = "bastion1"
   location                 = azurerm_resource_group.main.location
   resource_group_name      = azurerm_resource_group.main.name
-  virtual_network_id = azurerm_virtual_network.vnet.id                   // only supported when sku is developer 
-  sku = "Developer"                                                      // use standard sku for production
+  //virtual_network_id = azurerm_virtual_network.vnet.id                   // only supported when sku is developer, cannot use ip_configuration[] block
+  sku = "Standard"                                                      // standard sku for production, needs ip_configuration[] block, cannot use vnet_id
 
   ip_configuration {
     name = "ip1"
@@ -266,26 +297,26 @@ resource "azurerm_public_ip" "public_ip_bastion1" {
   //sku                 = "Standard"
 }
 
-# resource "azurerm_bastion_host" "bastion2" {
-#   //for_each = toset(local.public_subnets)                                // 1 bastion per vnet
-#   name                     = "bastion2"
-#   location                 = azurerm_resource_group.main.location
-#   resource_group_name      = azurerm_resource_group.main.name
-#   virtual_network_id = azurerm_virtual_network.vnet.id                   // only supported when sku is developer 
-#   sku = "Developer"                                                      // use standard sku for production
+resource "azurerm_bastion_host" "bastion2" {
+  //for_each = toset(local.public_subnets)                                // 1 bastion per vnet
+  name                     = "bastion2"
+  location                 = azurerm_resource_group.main.location
+  resource_group_name      = azurerm_resource_group.main.name
+  //virtual_network_id = azurerm_virtual_network.vnet.id                   // only supported when sku is developer 
+  sku = "Standard"                                                      // use standard sku for production
 
-#   ip_configuration {
-#     name = "ip"
-#     public_ip_address_id = azurerm_public_ip.public_ip_bastion.id
-#     subnet_id = azurerm_subnet.subnets_zone1[0].id
-#   }
-# }
+  ip_configuration {
+    name = "ip2"
+    public_ip_address_id = azurerm_public_ip.public_ip_bastion2.id
+    subnet_id = azurerm_subnet.subnets_zone2[0].id
+  }
+}
 
-# resource "azurerm_public_ip" "public_ip_bastion2" {
-#   for_each            = toset(local.public_subnets)                         //Iterate over the public subnets
-#   name                = "${each.value}-bastion-ip"
-#   location            = azurerm_resource_group.main.location
-#   resource_group_name = azurerm_resource_group.main.name
-#   allocation_method   = "Static"
-#   sku                 = "Standard"
-# }
+resource "azurerm_public_ip" "public_ip_bastion2" {
+  //for_each            = toset(local.public_subnets)                         //Iterate over the public subnets
+  name                = "bastion-ip2"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  allocation_method   = "Static"
+  //sku                 = "Standard"
+}
