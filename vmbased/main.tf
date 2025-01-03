@@ -1,3 +1,12 @@
+// fix bastion host security group
+// add scaling sets to both subnets
+// add app gateway
+// add sql and nosql databases
+// add route 53
+// use a dyanmic website for testing
+
+
+
 locals {
   zones = ["1", "2"]
 
@@ -10,17 +19,33 @@ locals {
 
   //zone 2: Public, Private (VM), Private (DB)
   subnets_zone2 = [
-    { name = "AzureBastionSubnet", address_prefixes = "10.0.4.0/24" },
+    { name = "public-lb-subnet-zone2", address_prefixes = "10.0.4.0/24" },
     { name = "private-vm-subnet-zone2", address_prefixes = "10.0.5.0/24" },
     { name = "private-db-subnet-zone2", address_prefixes = "10.0.6.0/24" }
   ]
 
-  //Combine both zones' public subnets to create public IPs
-  public_subnets = flatten(concat([ 
-    for subnet in local.subnets_zone1 : subnet.name if substr(subnet.name, 0, 5) == "Azure" 
+  //Combines both zones' public subnets to create public IPs
+  public_subnets = flatten(concat([                                                            # logic creates list for public subnets, takes public subnets from the top lists
+    for subnet in local.subnets_zone1 : subnet.name if substr(subnet.name, 0, 5) == "Azure"    #refers to subnets_zone1[0] AzureBastionSubnet
     ] , [ 
-    for subnet in local.subnets_zone2 : subnet.name if substr(subnet.name, 0, 5) == "Azure" 
+    for subnet in local.subnets_zone2 : subnet.name if substr(subnet.name, 0, 6) == "public"   #refers to subnets_zone2[0] public subnet for load balancer
     ]))
+
+  //Combines both zones' private vm subnets to create one list for private vma - used in scaling set block, check line ...
+  private_vm_subnets = flatten(concat([                                                            # logic creates list for private vm subnets
+    for subnet in local.subnets_zone1 : subnet.name if substr(subnet.name, 0, 10) == "private-vm"    #refers to subnets_zone1[1] 
+    ] , [ 
+    for subnet in local.subnets_zone2 : subnet.name if substr(subnet.name, 0, 10) == "private-vm"   #refers to subnets_zone2[1] 
+    ]))
+
+  //resources for load balancer configuration
+  backend_address_pool_name      = "${azurerm_virtual_network.vnet.name}-backend-address-pool"
+  frontend_port_name             = "${azurerm_virtual_network.vnet.name}-frontend-port"
+  frontend_ip_configuration_name = "${azurerm_virtual_network.vnet.name}-frontend-ip"
+  http_setting_name              = "${azurerm_virtual_network.vnet.name}-http-setting"
+  listener_name                  = "${azurerm_virtual_network.vnet.name}-listener-name"
+  request_routing_rule_name      = "${azurerm_virtual_network.vnet.name}-routing-rule"
+  redirect_configuration_name    = "${azurerm_virtual_network.vnet.name}-redirect-config"
 }
 
 resource "azurerm_resource_group" "main" {
@@ -54,12 +79,12 @@ resource "azurerm_subnet_nat_gateway_association" "nat_to_pubsub1" {
 
   depends_on = [ azurerm_subnet.subnets_zone1, azurerm_nat_gateway.nat_gateway ]        // needs zone 1 subnets and NAT gateway
 }
-#----------------------- NAT gateway & public IPs ------------------------#
+#----------------------- NAT gateway ------------------------#
 
 //block creates 2 NAT Gateways for each public subnet
 resource "azurerm_nat_gateway" "nat_gateway" {
   for_each            = toset(local.public_subnets)
-  name                = "${each.value}-nat-gateway"
+  name                = "${each.value}-NATgateway"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   //zones               = each.value == "public-subnet-zone1" ? ["1"] : ["2"]       //assign NAT Gateway to a each zone
@@ -75,31 +100,19 @@ resource "azurerm_subnet" "subnets_zone2" {
   resource_group_name = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes =[local.subnets_zone2[count.index].address_prefixes]
-
+  
   depends_on = [ azurerm_virtual_network.vnet ]
 }
 
 #associate NAT Gateway to public subnet 2
 resource "azurerm_subnet_nat_gateway_association" "nat_to_pubsub2" {
   subnet_id           = azurerm_subnet.subnets_zone2[0].id
-  nat_gateway_id      = azurerm_nat_gateway.nat_gateway["AzureBastionSubnet"].id
+  nat_gateway_id      = azurerm_nat_gateway.nat_gateway["public-lb-subnet-zone2"].id
 
   depends_on = [ azurerm_subnet.subnets_zone2, azurerm_nat_gateway.nat_gateway ]     // needs zone 2 subnets and NAT gateway
 }
 
-#----------------------- NAT gateway & public IPs ------------------------#
-
-//block creates 2 NAT Gateways for each public subnet
-resource "azurerm_nat_gateway" "nat_gateway" {                                  //delete
-  for_each            = toset(local.public_subnets)
-  name                = "${each.value}-nat-gateway"
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-  //zones               = each.value == "public-subnet-zone1" ? ["1"] : ["2"]       //assign NAT Gateway to a each zone
-
-  depends_on = [ azurerm_virtual_network.vnet ]
-  
-}
+#----------------------- public IPs ------------------------#
 
 # Create 2 Elastic IPs for each public subnet
 resource "azurerm_public_ip" "public_ip_nat" {
@@ -125,8 +138,8 @@ resource "azurerm_nat_gateway_public_ip_association" "nat_to_ip_association" {
 
 #----------------------- route table for zone 1 ------------------------#
 
-resource "azurerm_route_table" "private_rt1" {
-  name                = "private-route-table1"
+resource "azurerm_route_table" "route_table_bastion" {
+  name                = "route-table-to-bastion-subnet"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
 
@@ -143,18 +156,18 @@ resource "azurerm_route_table" "private_rt1" {
 #------- route table associations --------#
 resource "azurerm_subnet_route_table_association" "zone1_private_subnet_association" {
   subnet_id      = azurerm_subnet.subnets_zone1[1].id                    //Private VM subnet in zone 1 (index 1)
-  route_table_id = azurerm_route_table.private_rt1.id
+  route_table_id = azurerm_route_table.route_table_bastion.id
 }
 
 resource "azurerm_subnet_route_table_association" "zone1_private_db_subnet_association" {
   subnet_id      = azurerm_subnet.subnets_zone1[2].id                    //Private DB subnet in zone 1 (index 2)
-  route_table_id = azurerm_route_table.private_rt1.id
+  route_table_id = azurerm_route_table.route_table_bastion.id
 }
 
 #----------------------- route table for zone 2 ------------------------#
 
-resource "azurerm_route_table" "private_rt2" {
-  name                = "private-route-table2"
+resource "azurerm_route_table" "route_table_lb" {
+  name                = "route-table-to-load-balancer-subnet"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
 
@@ -162,7 +175,7 @@ resource "azurerm_route_table" "private_rt2" {
     name                   = "internet-access"                             // Route to internet via NAT Gateway
     address_prefix         = var.all_cidr
     next_hop_type          = "VirtualAppliance"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
-    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat["AzureBastionSubnet"].ip_address   //NAT Gateway for internet access
+    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat["public-lb-subnet-zone2"].ip_address   //NAT Gateway for internet access
   }
 
   depends_on = [ azurerm_public_ip.public_ip_nat, azurerm_nat_gateway.nat_gateway ]
@@ -171,152 +184,178 @@ resource "azurerm_route_table" "private_rt2" {
 #------- route table associations --------#
 resource "azurerm_subnet_route_table_association" "zone2_private_subnet_association" {
   subnet_id      = azurerm_subnet.subnets_zone2[1].id                         //Private VM subnet in zone 2 (index 1)
-  route_table_id = azurerm_route_table.private_rt2.id
+  route_table_id = azurerm_route_table.route_table_lb.id
 }
 
 resource "azurerm_subnet_route_table_association" "zone2_private_db_subnet_association" {
   subnet_id      = azurerm_subnet.subnets_zone2[2].id                         //Private DB subnet in zone 2 (index 2)
-  route_table_id = azurerm_route_table.private_rt2.id
+  route_table_id = azurerm_route_table.route_table_lb.id
 }
 
 #----------------------------- security groups ------------------------------#
 
-# resource "azurerm_network_security_group" "bastion_nsg" {
+# #----nsg for bastion----#
+# resource "azurerm_network_security_group" "bastion_nsg" {               // security group allows bastion host to ssh into all resources in vnet
 #   name                = "bastion-nsg"
 #   location            = azurerm_resource_group.main.location
 #   resource_group_name = azurerm_resource_group.main.name
 
-#   security_rule {
-#     name                       = "Allow-SSH-from-trusted-IP"
-#     priority                   = 100
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "Tcp"
-#     source_port_range          = "*"
-#     destination_port_range     = "22"
-#     source_address_prefix      = "your_trusted_ip_address_or_range"
-#     destination_address_prefix = "*"
-#   }
-
-#   security_rule {
-#     name                       = "Allow-RDP-from-Trusted-IP"
-#     priority                   = 110
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "Tcp"
-#     source_port_range          = "*"
-#     destination_port_range     = "3389"
-#     source_address_prefix      = "your_trusted_ip_address_or_range"
-#     destination_address_prefix = "*"
-#   }
 # }
 
-# resource "azurerm_network_security_group" "vm_nsg" {
-#   name                = "vm-nsg"
-#   location            = azurerm_resource_group.main.location
-#   resource_group_name = azurerm_resource_group.main.name
-
-#   security_rule {
-#     name                       = "Allow-SSH-from-Bastion"
-#     priority                   = 100
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "Tcp"
-#     source_port_range          = "*"
-#     destination_port_range     = "22"  # Or 3389 for RDP, adjust based on OS
-#     source_address_prefix      = azurerm_network_security_group.bastion_nsg.id
-#     destination_address_prefix = "*"
-#   }
-
-#   security_rule {
-#     name                       = "Allow-Internal-VM-Access"
-#     priority                   = 110
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "*"
-#     source_port_range          = "*"
-#     destination_port_range     = "*"
-#     source_address_prefix      = "10.0.0.0/8"  # Adjust based on your network
-#     destination_address_prefix = "*"
-#   }
+# // block associates the Bastion NSG with the Bastion subnet
+# resource "azurerm_subnet_network_security_group_association" "bastion_nsg_association" {
+#   subnet_id                 = azurerm_subnet.subnets_zone1[0].id
+#   network_security_group_id = azurerm_network_security_group.bastion_nsg.id
 # }
 
-# resource "azurerm_network_security_group" "db_nsg" {
-#   name                = "db-nsg"
-#   location            = azurerm_resource_group.main.location
-#   resource_group_name = azurerm_resource_group.main.name
+#---- nsg for the virtual machines----#
+resource "azurerm_network_security_group" "vm_nsg" {
+  name                = "virtual-machine-nsg"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name   
+  // add rules after creation of vms/ allow inbound traffic from load balancer, database and bastion only. allow outbound traffic to nat gateway only
+}
 
-#   security_rule {
-#     name                       = "Allow-VM-to-DB"
-#     priority                   = 100
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "Tcp"
-#     source_port_range          = "*"
-#     destination_port_range     = "3306"  # MySQL, adjust if using another DB type
-#     source_address_prefix      = "10.0.0.0/8"  # Internal subnets, adjust accordingly
-#     destination_address_prefix = "*"
-#   }
+#2 blocks to associate nsg with subnets the vms are located in
+resource "azurerm_subnet_network_security_group_association" "zone1_vm_nsg" {
+  subnet_id                 = azurerm_subnet.subnets_zone1[1].id
+  network_security_group_id = azurerm_network_security_group.vm_nsg.id
+}
 
-#   security_rule {
-#     name                       = "Allow-Admin-Access"
-#     priority                   = 110
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "Tcp"
-#     source_port_range          = "*"
-#     destination_port_range     = "3306"  # MySQL, adjust based on your DB port
-#     source_address_prefix      = "trusted_admin_ip_range"
-#     destination_address_prefix = "*"
-#   }
-# }
+resource "azurerm_subnet_network_security_group_association" "zone2_vm_nsg" {
+  subnet_id                 = azurerm_subnet.subnets_zone2[1].id
+  network_security_group_id = azurerm_network_security_group.vm_nsg.id
+}
+
+#---- nsg for the databases----#
+resource "azurerm_network_security_group" "db_nsg" {
+  name                = "database-nsg"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+    // add rules after creation of database. allow inbound traffic from the virtual machines and bastion only. allow outbound traffic to nat gateway only - maybe allow outbound to vm and bastion
+
+}
+
+#2 blocks to associate nsg with subnets the db are located in
+resource "azurerm_subnet_network_security_group_association" "zone1_db_nsg" {
+  subnet_id                 = azurerm_subnet.subnets_zone1[2].id
+  network_security_group_id = azurerm_network_security_group.db_nsg.id
+}
+
+resource "azurerm_subnet_network_security_group_association" "zone2_db_nsg" {
+  subnet_id                 = azurerm_subnet.subnets_zone2[2].id
+  network_security_group_id = azurerm_network_security_group.db_nsg.id
+}
 
 #---------------------------- bastion & IP -----------------------------#
 
-resource "azurerm_bastion_host" "bastion1" {
+resource "azurerm_bastion_host" "bastion" {
   //for_each = toset(local.public_subnets)                                // 1 bastion per vnet
-  name                     = "bastion1"
+  name                     = "bastion"
   location                 = azurerm_resource_group.main.location
   resource_group_name      = azurerm_resource_group.main.name
   //virtual_network_id = azurerm_virtual_network.vnet.id                   // only supported when sku is developer, cannot use ip_configuration[] block
   sku = "Standard"                                                      // standard sku for production, needs ip_configuration[] block, cannot use vnet_id
 
   ip_configuration {
-    name = "ip1"
-    public_ip_address_id = azurerm_public_ip.public_ip_bastion1.id
+    name = "ip_config"
+    public_ip_address_id = azurerm_public_ip.public_ip_bastion.id
     subnet_id = azurerm_subnet.subnets_zone1[0].id
   }
 }
 
-resource "azurerm_public_ip" "public_ip_bastion1" {
+resource "azurerm_public_ip" "public_ip_bastion" {
   //for_each            = toset(local.public_subnets)                         //Iterate over the public subnets
-  name                = "bastion-ip1"
+  name                = "bastion_-ip"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   allocation_method   = "Static"
   //sku                 = "Standard"
 }
 
-resource "azurerm_bastion_host" "bastion2" {
-  //for_each = toset(local.public_subnets)                                // 1 bastion per vnet
-  name                     = "bastion2"
-  location                 = azurerm_resource_group.main.location
-  resource_group_name      = azurerm_resource_group.main.name
-  //virtual_network_id = azurerm_virtual_network.vnet.id                   // only supported when sku is developer 
-  sku = "Standard"                                                      // use standard sku for production
 
-  ip_configuration {
-    name = "ip2"
-    public_ip_address_id = azurerm_public_ip.public_ip_bastion2.id
-    subnet_id = azurerm_subnet.subnets_zone2[0].id
+#---------------------------- application gateway -----------------------------#
+
+# Public IP for the Load Balancer
+# resource "azurerm_public_ip" "app_gateway_IP" {
+#   name                = "application-gateway-public-IP"
+#   location            = azurerm_resource_group.main.location
+#   resource_group_name = azurerm_resource_group.main.name
+#   allocation_method   = "Static"
+# }
+
+# resource "azurerm_application_gateway" "app_gateway" {
+#   name = "application-gateway"
+#   location = azurerm_resource_group.main.location
+#   resource_group_name = azurerm_resource_group.main.name
+
+#   gateway_ip_configuration {
+#     name = "gateway_ip"                            // create new private subnet for this
+#     subnet_id = azurerm_subnet.subnets_zone2[1].id
+#   }
+  
+#   frontend_ip_configuration {
+#     name = local.frontend_ip_configuration_name
+#     //public_ip_address_id = azurerm_public_ip.app_gateway_IP
+#     subnet_id = azurerm_subnet.subnets_zone2[0].id
+#   }
+
+#   frontend_port {
+#     name = local.frontend_port_name
+#     port = 80
+#   }
+
+#   http_listener {
+#     name = local.listener_name
+#     protocol = 80
+#     frontend_ip_configuration_name = azurerm_application_gateway_frontend_ip_configuration.frontend_ip_configuration.id
+#     frontend_port_name = 
+#   }
+
+#   request_routing_rule {
+#     name = local.request_routing_rule_name
+#     http_listener_name = local.listener_name
+#     rule_type = "basic"
+#   }
+
+#   backend_address_pool {
+#     name = local.backend_address_pool_name
+#     ip_addresses = [  ]
+#   }
+
+#   backend_http_settings {
+#     name = "backend-http-setting"
+#     protocol = "Http"
+#     port = 80
+#     cookie_based_affinity =
+    
+#   }
+
+#   sku {
+#     name = "sku"
+#     tier = "Standard_v2"
+#   }
+# }
+
+#---------------------------- linux scale sets -----------------------------#
+
+resource "azurerm_linux_virtual_machine_scale_set" "linux_vm" {
+  for_each = toset(local.private_vm_subnets)
+  name = "linux-vm-${each.key}"
+  location = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  admin_username = "Admin"
+  sku = "Standard_F2"
+  os_disk {
+    storage_account_type = "Standard_LRS"
+    caching = "readWrite"
   }
-}
+  network_interface {
+    name = "change"
 
-resource "azurerm_public_ip" "public_ip_bastion2" {
-  //for_each            = toset(local.public_subnets)                         //Iterate over the public subnets
-  name                = "bastion-ip2"
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-  allocation_method   = "Static"
-  //sku                 = "Standard"
+    ip_configuration {
+      name = "ip-config"
+      subnet_id = local.private_vm_subnets[each.key].id
+    }
+  }
 }
