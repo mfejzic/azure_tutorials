@@ -1,4 +1,5 @@
 // fix bastion host security group
+// fix all other security groups
 // add scaling sets to both subnets
 // add app gateway
 // add sql and nosql databases
