@@ -18,3 +18,10 @@ output "zone_names" {
   value = local.zones
   description = "List of zone names"
 }
+
+output "public_ip_nat_agw_zone2" {
+  value = azurerm_public_ip.public_ip_nat_agw.zones
+  description = "public_ip_nat_agw zone"
+}
+
+
