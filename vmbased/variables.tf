@@ -1,6 +1,6 @@
-variable "uswest" {
+variable "eastus" {
   type = string
-  default = "westus"
+  default = "eastus"
 }
 
 variable "full_cidr" {
