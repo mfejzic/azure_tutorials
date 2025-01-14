@@ -1,11 +1,14 @@
 // fix bastion host security group
 // add scaling sets to both subnets
 // fix app gateway
-// add sql and nosql databases
+// add sql databases
 // add route 53
 // use a dyanmic website for testing
 
-// stuck on line 270, either create two public ip blocks for nat gateways, or find another way
+// ssh into vms from bastion, configure ssh key for vm and nsg for both subnets
+// create db after this, ssh into db from bastion and from vm, must work in all zones
+// fix up load balancer
+// find prebuilt webpage to population the vm and db, test it with fake traffic
 
 locals {
   zones = ["1", "2"]
@@ -529,21 +532,74 @@ resource "azurerm_subnet_route_table_association" "zone2_rt_association_db" {
 #   //id = "/CommunityGalleries/graphdb-02faf3ce-79ed-4676-ab69-0e422bbd9ee1/Images/10.4.3-x86_64"
 # }
 
+provider "tls" {}
+
+# Generate SSH key pair for Azure VM
+resource "tls_private_key" "tls_private_key" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+# Store the private key on the local machine
+resource "local_file" "local_file" {
+  content  = tls_private_key.tls_private_key.private_key_pem
+  filename = "linuxkey.pem"  # Store this file in the current directory (or change the path)
+}
+
+# Azure Key Vault to store SSH key (Optional, for secure storage of the key)
+resource "azurerm_key_vault" "key_vault" {
+  name                        = "key-vault-mf37"
+  location                    = data.azurerm_resource_group.main.location
+  resource_group_name         = data.azurerm_resource_group.main.name
+  enabled_for_disk_encryption = true
+  tenant_id = "16983dae-9f48-4a35-b9f5-0519bf3cdf09"
+  sku_name = "standard"
+}
+
+# Store the public SSH key in Key Vault (Optional)
+resource "azurerm_key_vault_secret" "public_key" {
+  name         = "ssh-public-key"
+  value        = tls_private_key.tls_private_key.public_key_openssh
+  key_vault_id = azurerm_key_vault.key_vault.id
+}
+
+data "azurerm_client_config" "current" {}
+
+
+resource "azurerm_key_vault_access_policy" "kv_access_policy" {
+  key_vault_id = azurerm_key_vault.key_vault.id
+  tenant_id    = "16983dae-9f48-4a35-b9f5-0519bf3cdf09"
+  object_id    = "7b599db4-a713-4a7e-9c06-8b62bf11eed2"
+
+  key_permissions = [
+    "Get", "List", "Create", "Update", "Import"
+  ]
+
+  secret_permissions = [
+    "Get", "List", "Set"
+  ]
+}
+
 //created two scale sets per subnet for more granular control
 resource "azurerm_linux_virtual_machine_scale_set" "linux_vm" {
   //for_each = azurerm_subnet.vm_subnets
-  count = 2
   name = "linux-vm"
   location = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
-  admin_username = "Admin"
-  sku = "Standard_F2"
-  instances = 3
+  admin_username = "Admin0"
+  sku = "Standard_D2s_v3"
+  instances = 1
   upgrade_mode = "Automatic"
   zones = [ "1" ]
-  disable_password_authentication = false
+  disable_password_authentication = true
   // add source image id or source image reference
   //source_image_id = data.azurerm_image.community_image.id
+  
+  admin_ssh_key {
+    public_key = tls_private_key.tls_private_key.public_key_openssh
+    username = "Admin0"
+    
+  }
 
   source_image_reference {
     publisher = "Canonical"
@@ -558,34 +614,61 @@ resource "azurerm_linux_virtual_machine_scale_set" "linux_vm" {
   }
   network_interface {
     name = "net-interface"
+    primary = true
 
     ip_configuration {
       name = "ip-config"
-      subnet_id = azurerm_subnet.vm_subnets[count.index].id
+      subnet_id = azurerm_subnet.vm_subnets[0].id
     }
   }
 }
 
-# resource "azurerm_linux_virtual_machine_scale_set" "linux_vm_2" {
-#   name = "linux-vm-2"
+
+
+# resource "azurerm_linux_virtual_machine_scale_set" "linux_vm2" {
+#   name = "linux-vm2"
 #   location = data.azurerm_resource_group.main.location
 #   resource_group_name = data.azurerm_resource_group.main.name
-#   admin_username = "Admin"
-#   sku = "Standard_F2"
-#   source_image_id = data.azurerm_image.community_image.id
+#   admin_username = "Admin0"
+#   sku = "Standard_D2s_v3"
+#   instances = 1
+#   upgrade_mode = "Automatic"
+#   zones = [ "2" ]
+#   disable_password_authentication = true
+#   // add source image id or source image reference
+#   //source_image_id = data.azurerm_image.community_image.id
+  
+#   admin_ssh_key {
+#     public_key = tls_private_key.tls_private_key.public_key_openssh
+#     username = "Admin0"
+    
+#   }
+
+#   source_image_reference {
+#     publisher = "Canonical"
+#     offer     = "0001-com-ubuntu-server-jammy"
+#     sku       = "22_04-lts-gen2"
+#     version   = "latest"
+#   }
+
 #   os_disk {
 #     storage_account_type = "Standard_LRS"
 #     caching = "ReadWrite"
 #   }
 #   network_interface {
-#     name = "net-interface2"
+#     name = "net-interface"
+#     primary = true
 
 #     ip_configuration {
-#       name = "ip-config2"
-#       subnet_id = azurerm_subnet.s
+#       name = "ip-config"
+#       subnet_id = azurerm_subnet.vm_subnets[1].id
 #     }
 #   }
 # }
+
+
+
+
 
 #---------------------------- database server -----------------------------#
 
