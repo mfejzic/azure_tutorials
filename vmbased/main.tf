@@ -627,6 +627,15 @@ resource "azurerm_linux_virtual_machine_scale_set" "linux_vm2" {
   }
 }
 
+resource "azurerm_network_interface" "name" {
+  
+}
+
+resource "azurerm_network_interface_application_gateway_backend_address_pool_association" "name" {
+  
+}
+// play with these reousources and find out which one to use
+
 
 
 
