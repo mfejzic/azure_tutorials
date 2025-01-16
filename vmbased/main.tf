@@ -6,7 +6,7 @@
 // use a dyanmic website for testing
 
 // ssh into vms from bastion, configure ssh key for vm and nsg for both subnets
-// add correct backend pools4
+// add correct backend pools in the app gateway
 // create db after this, ssh into db from bastion and from vm, must work in all zones
 // fix up load balancer
 // find prebuilt webpage to population the vm and db, test it with fake traffic
