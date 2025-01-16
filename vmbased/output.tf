@@ -24,4 +24,9 @@ output "public_ip_nat_agw_zone2" {
   description = "public_ip_nat_agw zone"
 }
 
+output "vmscale_set_1_zone" {
+  value = azurerm_linux_virtual_machine_scale_set.linux_vm.zones
+  description = "prisub1 vm zone"
+}
+
 
