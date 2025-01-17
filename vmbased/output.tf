@@ -29,4 +29,13 @@ output "vmscale_set_1_zone" {
   description = "prisub1 vm zone"
 }
 
+output "vmss_addresses" {
+  value = azurerm_network_interface.vmss.private_ip_addresses
+  description = "vmss ip addresses"
+}
+
+output "vmss_2_addresses" {
+  value = azurerm_network_interface.vmss_2.private_ip_addresses
+  description = "vmss_2 ip addresses"
+}
 
