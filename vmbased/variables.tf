@@ -1,6 +1,6 @@
 variable "eastus" {
   type = string
-  default = "eastus"
+  default = "northeurope"
 }
 
 variable "full_cidr" {
