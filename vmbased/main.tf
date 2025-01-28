@@ -1,5 +1,4 @@
 // fix bastion host security group
-// add sql databases
 // add route 53
 // use a dyanmic website for testing
 
@@ -7,6 +6,24 @@
 //    fix the security groups for bastion and vm scale set
 // create db after this, ssh into db from bastion and from vm, must work in all zones
 // find prebuilt webpage to population the vm and db, test it with fake traffic
+
+# do these in order
+
+// bastion must communicate with vmss
+// vmss must communicate with db
+// bastion must communicate with db
+
+##
+
+// create mysql database and server in 1 region that spans both private db subnets
+
+// adjust app gateway
+
+// download ecommerce website and host it
+
+// create diagnostic logs to montior the traffic
+
+// might need a public endpoint to ping db from vm
 
 locals {
   zones = ["1", "2"]
@@ -188,7 +205,7 @@ resource "azurerm_subnet_nat_gateway_association" "agw_subnet" {
 }
 
 
-#----------------------- public IPs ------------------------#
+#----------------------- public IPs ------------------------#          // needs rework
 
 # Elastic IPs for bastion subnet
 resource "azurerm_public_ip" "public_ip_nat_bastion" {
@@ -244,8 +261,8 @@ resource "azurerm_route_table" "route_table_bastion" {
   route {
     name                   = "internet-access"                             // Route for internet access via NAT Gateway
     address_prefix         = var.all_cidr
-    next_hop_type          = "VirtualAppliance"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
-    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_bastion.ip_address   //NAT Gateway for internet access
+    next_hop_type          = "Internet"                                    // use internet                     virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
+    //+6984next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_bastion.ip_address   //NAT Gateway for internet access
   }
 
   depends_on = [ azurerm_public_ip.public_ip_nat_bastion, azurerm_nat_gateway.nat_gateway_zone1 ]
@@ -272,8 +289,8 @@ resource "azurerm_route_table" "route_table_agw" {
   route {
     name                   = "internet-access"                             // Route to internet via NAT Gateway
     address_prefix         = var.all_cidr
-    next_hop_type          = "VirtualAppliance"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
-    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_agw.ip_address   //NAT Gateway for internet access
+    next_hop_type          = "Internet"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
+    //next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_agw.ip_address   //NAT Gateway for internet access
   }
 
   depends_on = [ azurerm_public_ip.public_ip_nat_agw, azurerm_nat_gateway.nat_gateway_zone2 ]
@@ -396,87 +413,87 @@ resource "azurerm_subnet_route_table_association" "zone2_rt_association_db" {
 # }
 
 #---- nsg for the virtual machines----#
-resource "azurerm_network_security_group" "vm_nsg" {
-  name                = "virtual-machine-nsg"
-  location            = data.azurerm_resource_group.main.location
-  resource_group_name = data.azurerm_resource_group.main.name   
-  // add rules after creation of vms/ allow inbound traffic from load balancer, database and bastion only. allow outbound traffic to nat gateway only
+# resource "azurerm_network_security_group" "vm_nsg" {
+#   name                = "virtual-machine-nsg"
+#   location            = data.azurerm_resource_group.main.location
+#   resource_group_name = data.azurerm_resource_group.main.name   
+#   // add rules after creation of vms/ allow inbound traffic from load balancer, database and bastion only. allow outbound traffic to nat gateway only
 
-  security_rule {
-    name                       = "Allow-ssh-from-bastion"
-    priority                   = 100
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                  = "Tcp"
-    source_port_range         = "*"
-    destination_port_range    = "22"  
-    source_address_prefix     = "*"  // allow all traffic from bastion
-    destination_address_prefix = "*"
-    description               = "Allow ssh access from Bastion host"
-  }
+#   security_rule {
+#     name                       = "Allow-ssh-from-bastion"
+#     priority                   = 100
+#     direction                  = "Inbound"
+#     access                     = "Allow"
+#     protocol                  = "Tcp"
+#     source_port_range         = "*"
+#     destination_port_range    = "22"  
+#     source_address_prefix     = "*"  // allow all traffic from bastion
+#     destination_address_prefix = "*"
+#     description               = "Allow ssh access from Bastion host"
+#   }
 
-  security_rule {
-    name                       = "allow-http-vmss"
-    priority                   = 110
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "80"  # HTTP Port
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
-  }
+#   security_rule {
+#     name                       = "allow-http-vmss"
+#     priority                   = 110
+#     direction                  = "Inbound"
+#     access                     = "Allow"
+#     protocol                   = "Tcp"
+#     source_port_range          = "*"
+#     destination_port_range     = "80"  # HTTP Port
+#     source_address_prefix      = "*"
+#     destination_address_prefix = "*"
+#   }
 
-  security_rule {
-    name                       = "allow-https-vmss"
-    priority                   = 120
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "443"  # HTTPS Port
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
-  }
+#   security_rule {
+#     name                       = "allow-https-vmss"
+#     priority                   = 120
+#     direction                  = "Inbound"
+#     access                     = "Allow"
+#     protocol                   = "Tcp"
+#     source_port_range          = "*"
+#     destination_port_range     = "443"  # HTTPS Port
+#     source_address_prefix      = "*"
+#     destination_address_prefix = "*"
+#   }
 
-  security_rule {
-    name                       = "Allow-outbound-to-zone1-nat"
-    priority                   = 200
-    direction                  = "Outbound"
-    access                     = "Allow"
-    protocol                  = "Tcp"
-    source_port_range         = "*"
-    destination_port_range    = "*"   
-    source_address_prefix     = "*"  
-    destination_address_prefix = "*"
-    description               = "Allow ssh access from Bastion host"
-  }
+#   security_rule {
+#     name                       = "Allow-outbound-to-zone1-nat"
+#     priority                   = 200
+#     direction                  = "Outbound"
+#     access                     = "Allow"
+#     protocol                  = "Tcp"
+#     source_port_range         = "*"
+#     destination_port_range    = "*"   
+#     source_address_prefix     = "*"  
+#     destination_address_prefix = "*"
+#     description               = "Allow ssh access from Bastion host"
+#   }
 
-  security_rule {
-    name                       = "Allow-outbound-to-zone2-nat"
-    priority                   = 210
-    direction                  = "Outbound"
-    access                     = "Allow"
-    protocol                  = "Tcp"
-    source_port_range         = "*"
-    destination_port_range    = "*"   
-    source_address_prefix     = "*"  
-    destination_address_prefix = "*"
-    description               = "Allow ssh access from Bastion host"
-  }
-}
+#   security_rule {
+#     name                       = "Allow-outbound-to-zone2-nat"
+#     priority                   = 210
+#     direction                  = "Outbound"
+#     access                     = "Allow"
+#     protocol                  = "Tcp"
+#     source_port_range         = "*"
+#     destination_port_range    = "*"   
+#     source_address_prefix     = "*"  
+#     destination_address_prefix = "*"
+#     description               = "Allow ssh access from Bastion host"
+#   }
+# }
 
 
-#2 blocks to associate nsg with subnets the vms are located in
-resource "azurerm_subnet_network_security_group_association" "zone1_vm_nsg" {
-  subnet_id                 = azurerm_subnet.vm_subnets[0].id
-  network_security_group_id = azurerm_network_security_group.vm_nsg.id
-}
+# #2 blocks to associate nsg with subnets the vms are located in
+# resource "azurerm_subnet_network_security_group_association" "zone1_vm_nsg" {
+#   subnet_id                 = azurerm_subnet.vm_subnets[0].id
+#   network_security_group_id = azurerm_network_security_group.vm_nsg.id
+# }
 
-resource "azurerm_subnet_network_security_group_association" "zone2_vm_nsg" {
-  subnet_id                 = azurerm_subnet.vm_subnets[1].id
-  network_security_group_id = azurerm_network_security_group.vm_nsg.id
-}
+# resource "azurerm_subnet_network_security_group_association" "zone2_vm_nsg" {
+#   subnet_id                 = azurerm_subnet.vm_subnets[1].id
+#   network_security_group_id = azurerm_network_security_group.vm_nsg.id
+# }
 
 # #---- nsg for the databases----#
 # resource "azurerm_network_security_group" "db_nsg" {
@@ -534,6 +551,7 @@ resource "azurerm_subnet_network_security_group_association" "zone2_vm_nsg" {
 # }
 
 # #---------------------------- bastion & IP -----------------------------#
+// includes all things bastion
 
 resource "azurerm_bastion_host" "bastion" {
   //for_each = toset(local.public_subnets)                                // 1 bastion per vnet
@@ -672,14 +690,18 @@ resource "azurerm_key_vault" "key_vault" {
   # network_acls {                                 //check if this is needed
   #   bypass = "AzureServices"
   #   default_action = "Allow"
-  #   virtual_network_subnet_ids = [ azurerm_subnet.db_subnets[count.index].id, azurerm_subnet.vm_subnets[count.index].id ]
+  #   virtual_network_subnet_ids = [ 
+  #   azurerm_subnet.db_subnets[0].id, 
+  #   azurerm_subnet.db_subnets[1].id, 
+  #   azurerm_subnet.vm_subnets[0].id, 
+  #   azurerm_subnet.vm_subnets[1].id ]
   # }
 }
 
 # Store the public SSH key in Key Vault (Optional)
 resource "azurerm_key_vault_secret" "public_key" {
-  name         = "ssh-public-key"
-  value        = tls_private_key.tls_private_key.public_key_openssh
+  name         = "ssh-private-key"
+  value        = tls_private_key.tls_private_key.private_key_pem
   key_vault_id = azurerm_key_vault.key_vault.id
 }
 
@@ -707,6 +729,14 @@ resource "azurerm_linux_virtual_machine_scale_set" "linux_vm" {
   location = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   admin_username = "Admin0"
+  admin_password = "Bratunac?13"
+
+  # secret {                                            // figure this out
+  #   key_vault_id = azurerm_key_vault.key_vault.id
+  #   certificate {
+  #     url = 
+  #   }
+  # }
   sku = "Standard_B2s"
   instances = 1
   upgrade_mode = "Automatic"
@@ -764,8 +794,9 @@ resource "azurerm_linux_virtual_machine_scale_set" "linux_vm2" {
   location = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   admin_username = "Admin0"
+  admin_password = "Bratunac?13"
   sku = "Standard_B2s"
-  instances = 1
+  instances = 2
   upgrade_mode = "Automatic"
   zones = [ "2" ]
   disable_password_authentication = true
@@ -858,25 +889,25 @@ resource "azurerm_network_interface" "vmss_2" {
 
 # #---------------------------- storage accounts -----------------------------#
 
-resource "azurerm_storage_account" "storage" {
-  name                     = "s3mf37"
-  resource_group_name      = data.azurerm_resource_group.main.name
-  location                 = data.azurerm_resource_group.main.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-}
+# resource "azurerm_storage_account" "storage" {
+#   name                     = "s3mf37"
+#   resource_group_name      = data.azurerm_resource_group.main.name
+#   location                 = data.azurerm_resource_group.main.location
+#   account_tier             = "Standard"
+#   account_replication_type = "LRS"
+# }
 
-resource "azurerm_storage_container" "container" {
-  name                  = "content"
-  storage_account_id = azurerm_storage_account.storage.id
-  container_access_type = "private"
-}
+# resource "azurerm_storage_container" "container" {
+#   name                  = "content"
+#   storage_account_id = azurerm_storage_account.storage.id
+#   container_access_type = "private"
+# }
 
-resource "azurerm_storage_blob" "blob" {
-  name                   = "blob"
-  storage_account_name   = azurerm_storage_account.storage.name
-  storage_container_name = azurerm_storage_container.container.name
-  type                   = "Block"
-  source                 = "error.html"
-  content_type = "text/html"  
-}
+# resource "azurerm_storage_blob" "blob" {
+#   name                   = "blob"
+#   storage_account_name   = azurerm_storage_account.storage.name
+#   storage_container_name = azurerm_storage_container.container.name
+#   type                   = "Block"
+#   source                 = "error.html"
+#   content_type = "text/html"  
+# }
