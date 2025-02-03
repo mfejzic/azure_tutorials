@@ -25,6 +25,9 @@
 
 // might need a public endpoint to ping db from vm
 
+
+## !!! add route table in public subnets with hop type as "internet"
+
 locals {
   zones = ["1", "2"]
 
@@ -158,7 +161,7 @@ resource "azurerm_subnet" "bastion_subnet" {
 
 // nat gateway for bastion subnet
 resource "azurerm_nat_gateway" "nat_gateway_zone1" {
-  name                = "NATgateway-for-bastion-subnet"
+  name                = "NATgateway-for-bastion"
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   zones = [ "1" ]
@@ -187,7 +190,7 @@ resource "azurerm_subnet" "agw_subnet" {
 
 // nat gateway for agw subnet
 resource "azurerm_nat_gateway" "nat_gateway_zone2" {
-  name                = "NATgateway-for-agw-subnet"
+  name                = "NATgateway-for-agw"
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   zones = [ "2" ]
@@ -251,18 +254,18 @@ resource "azurerm_nat_gateway_public_ip_association" "nat_to_ip_association2" {
 }
 
 
-#----------------------- zone 1 route table ------------------------#
+#----------------------- zone 1 private route tables ------------------------#
 
-resource "azurerm_route_table" "route_table_bastion" {
+resource "azurerm_route_table" "route_tables_zone1" {
   name                = "route-table-to-bastion-subnet"
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
 
   route {
-    name                   = "internet-access"                             // Route for internet access via NAT Gateway
+    name                   = "nat-access"                             // Route for internet access via NAT Gateway
     address_prefix         = var.all_cidr
-    next_hop_type          = "Internet"                                    // use internet                     virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
-    //+6984next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_bastion.ip_address   //NAT Gateway for internet access
+    next_hop_type          = "VirtualAppliance"                                    // use internet                     virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
+    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_bastion.ip_address   //NAT Gateway for internet access
   }
 
   depends_on = [ azurerm_public_ip.public_ip_nat_bastion, azurerm_nat_gateway.nat_gateway_zone1 ]
@@ -271,26 +274,26 @@ resource "azurerm_route_table" "route_table_bastion" {
 #------- route table associations --------#
 resource "azurerm_subnet_route_table_association" "zone1_rt_association_vm" {
   subnet_id      = azurerm_subnet.vm_subnets[0].id                   //Private VM subnet in zone 1 (index 1)
-  route_table_id = azurerm_route_table.route_table_bastion.id
+  route_table_id = azurerm_route_table.route_tables_zone1.id
 }
 
 resource "azurerm_subnet_route_table_association" "zone1_rt_association_db" {
   subnet_id      = azurerm_subnet.db_subnets[0].id                  //Private DB subnet in zone 1 (index 2)
-  route_table_id = azurerm_route_table.route_table_bastion.id
+  route_table_id = azurerm_route_table.route_tables_zone1.id
 }
 
-#----------------------- zone 2 route table ------------------------#
+#----------------------- zone 2 private route tables ------------------------#
 
-resource "azurerm_route_table" "route_table_agw" {
+resource "azurerm_route_table" "route_tables_zone2" {
   name                = "route-table-to-app-gateway-subnet"
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
 
   route {
-    name                   = "internet-access"                             // Route to internet via NAT Gateway
+    name                   = "nat-access"                             // Route to internet via NAT Gateway
     address_prefix         = var.all_cidr
-    next_hop_type          = "Internet"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
-    //next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_agw.ip_address   //NAT Gateway for internet access
+    next_hop_type          = "VirtualAppliance"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
+    next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_agw.ip_address   //NAT Gateway for internet access
   }
 
   depends_on = [ azurerm_public_ip.public_ip_nat_agw, azurerm_nat_gateway.nat_gateway_zone2 ]
@@ -299,14 +302,38 @@ resource "azurerm_route_table" "route_table_agw" {
 #------- route table associations --------#
 resource "azurerm_subnet_route_table_association" "zone2_rt_association_vm" {
   subnet_id      = azurerm_subnet.vm_subnets[1].id                         //Private VM subnet in zone 2 (index 1)
-  route_table_id = azurerm_route_table.route_table_agw.id
+  route_table_id = azurerm_route_table.route_tables_zone2.id
 }
 
 resource "azurerm_subnet_route_table_association" "zone2_rt_association_db" {
   subnet_id      = azurerm_subnet.db_subnets[1].id                         //Private DB subnet in zone 2 (index 2)
-  route_table_id = azurerm_route_table.route_table_agw.id
+  route_table_id = azurerm_route_table.route_tables_zone2.id
 }
 
+#-----------------------  public route tables ------------------------#
+
+resource "azurerm_route_table" "public_rt" {                 // check this works!!!
+  name = "route-to-internet"
+  resource_group_name = data.azurerm_resource_group.main.name
+  location = data.azurerm_resource_group.main.location
+
+  route {
+    name = "internet-access"
+    address_prefix         = var.all_cidr
+    next_hop_type = "Internet"
+  }
+}
+
+#------- route table associations --------#
+resource "azurerm_subnet_route_table_association" "public_bastion_rt_association" {
+  subnet_id      = azurerm_subnet.bastion_subnet.id                        
+  route_table_id = azurerm_route_table.public_rt.id
+}
+
+resource "azurerm_subnet_route_table_association" "public_agw_rt_association" {
+  subnet_id      = azurerm_subnet.agw_subnet.id                         
+  route_table_id = azurerm_route_table.public_rt.id
+}
 
 #----------------------------- security groups ------------------------------#
 // probably dont need bastion nsg???
@@ -703,6 +730,8 @@ resource "azurerm_key_vault_secret" "public_key" {
   name         = "ssh-private-key"
   value        = tls_private_key.tls_private_key.private_key_pem
   key_vault_id = azurerm_key_vault.key_vault.id
+
+  depends_on = [ azurerm_key_vault.key_vault ]
 }
 
 data "azurerm_client_config" "current" {}
@@ -720,6 +749,8 @@ resource "azurerm_key_vault_access_policy" "kv_access_policy" {
   secret_permissions = [
     "Get", "List", "Set"
   ]
+
+  depends_on = [ azurerm_key_vault.key_vault ]
 }
 
 //created two scale sets per subnet for more granular control
@@ -784,6 +815,7 @@ resource "azurerm_network_interface" "vmss" {
     subnet_id                     = azurerm_subnet.vm_subnets[0].id
     private_ip_address_allocation = "Dynamic"
   }
+
 }
 
 #---#
@@ -844,6 +876,7 @@ resource "azurerm_network_interface" "vmss_2" {
     subnet_id                     = azurerm_subnet.vm_subnets[1].id
     private_ip_address_allocation = "Dynamic"
   }
+  
 }
 
 
@@ -911,3 +944,17 @@ resource "azurerm_network_interface" "vmss_2" {
 #   source                 = "error.html"
 #   content_type = "text/html"  
 # }
+
+
+# #---------------------------- diagnostics & log analytics workspace -----------------------------#
+
+# resource "azurerm_log_analytics_workspace" "example" {
+#   name                = "acctest-01"
+#   location            = azurerm_resource_group.example.location
+#   resource_group_name = azurerm_resource_group.example.name
+#   sku                 = "PerGB2018"
+#   retention_in_days   = 30
+# }
+
+
+# #---------------------------- route 53 -----------------------------#
