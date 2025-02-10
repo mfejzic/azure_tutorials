@@ -325,10 +325,10 @@ resource "azurerm_route_table" "public_rt" {                 // check this works
 }
 
 #------- route table associations --------#
-resource "azurerm_subnet_route_table_association" "public_bastion_rt_association" {
-  subnet_id      = azurerm_subnet.bastion_subnet.id                        
-  route_table_id = azurerm_route_table.public_rt.id
-}
+# resource "azurerm_subnet_route_table_association" "public_bastion_rt_association" {      // cannot attach route table to 
+#   subnet_id      = azurerm_subnet.bastion_subnet.id                        
+#   route_table_id = azurerm_route_table.public_rt.id
+# }
 
 resource "azurerm_subnet_route_table_association" "public_agw_rt_association" {
   subnet_id      = azurerm_subnet.agw_subnet.id                         
@@ -440,142 +440,111 @@ resource "azurerm_subnet_route_table_association" "public_agw_rt_association" {
 # }
 
 #---- nsg for the virtual machines----#
-# resource "azurerm_network_security_group" "vm_nsg" {
-#   name                = "virtual-machine-nsg"
-#   location            = data.azurerm_resource_group.main.location
-#   resource_group_name = data.azurerm_resource_group.main.name   
-#   // add rules after creation of vms/ allow inbound traffic from load balancer, database and bastion only. allow outbound traffic to nat gateway only
+resource "azurerm_network_security_group" "vm_nsg" {
+  name                = "virtual-machine-nsg"
+  location            = data.azurerm_resource_group.main.location
+  resource_group_name = data.azurerm_resource_group.main.name   
+  // add rules after creation of vms/ allow inbound traffic from load balancer, database and bastion only. allow outbound traffic to nat gateway only
 
-#   security_rule {
-#     name                       = "Allow-ssh-from-bastion"
-#     priority                   = 100
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                  = "Tcp"
-#     source_port_range         = "*"
-#     destination_port_range    = "22"  
-#     source_address_prefix     = "*"  // allow all traffic from bastion
-#     destination_address_prefix = "*"
-#     description               = "Allow ssh access from Bastion host"
-#   }
+  security_rule {
+    name                       = "Allow-ssh-from-bastion"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                  = "Tcp"
+    source_port_range         = "*"
+    destination_port_range    = "22"  
+    source_address_prefix     = azurerm_public_ip.public_ip_bastion.ip_address  // allow ssh traffic from bastion
+    destination_address_prefix = "*"
+    description               = "Allow ssh access from Bastion host"
+  }
 
-#   security_rule {
-#     name                       = "allow-http-vmss"
-#     priority                   = 110
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "Tcp"
-#     source_port_range          = "*"
-#     destination_port_range     = "80"  # HTTP Port
-#     source_address_prefix      = "*"
-#     destination_address_prefix = "*"
-#   }
+  security_rule {
+    name                       = "ssh-outbound"          // allow outbound ssh 
+    priority                   = 110
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                  = "Tcp"
+    source_port_range         = "*"
+    destination_port_range    = "22"  
+    source_address_prefix     = "*"  
+    destination_address_prefix = "*"
+    description               = "Allow ssh access from Bastion host"
+  }
 
-#   security_rule {
-#     name                       = "allow-https-vmss"
-#     priority                   = 120
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "Tcp"
-#     source_port_range          = "*"
-#     destination_port_range     = "443"  # HTTPS Port
-#     source_address_prefix      = "*"
-#     destination_address_prefix = "*"
-#   }
+  security_rule {
+    name                       = "http-outbound"
+    priority                   = 120
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"  # HTTP Port
+    source_address_prefix      = "*"
+    destination_address_prefix = "Internet"
+  }
 
-#   security_rule {
-#     name                       = "Allow-outbound-to-zone1-nat"
-#     priority                   = 200
-#     direction                  = "Outbound"
-#     access                     = "Allow"
-#     protocol                  = "Tcp"
-#     source_port_range         = "*"
-#     destination_port_range    = "*"   
-#     source_address_prefix     = "*"  
-#     destination_address_prefix = "*"
-#     description               = "Allow ssh access from Bastion host"
-#   }
-
-#   security_rule {
-#     name                       = "Allow-outbound-to-zone2-nat"
-#     priority                   = 210
-#     direction                  = "Outbound"
-#     access                     = "Allow"
-#     protocol                  = "Tcp"
-#     source_port_range         = "*"
-#     destination_port_range    = "*"   
-#     source_address_prefix     = "*"  
-#     destination_address_prefix = "*"
-#     description               = "Allow ssh access from Bastion host"
-#   }
-# }
+  security_rule {
+    name                       = "https-outbound"
+    priority                   = 130
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"  # HTTPS Port
+    source_address_prefix      = "*"
+    destination_address_prefix = "Internet"
+  }
+}
 
 
-# #2 blocks to associate nsg with subnets the vms are located in
-# resource "azurerm_subnet_network_security_group_association" "zone1_vm_nsg" {
-#   subnet_id                 = azurerm_subnet.vm_subnets[0].id
-#   network_security_group_id = azurerm_network_security_group.vm_nsg.id
-# }
+#2 blocks to associate nsg with subnets the vms are located in
+resource "azurerm_subnet_network_security_group_association" "zone1_vm_nsg" {
+  subnet_id                 = azurerm_subnet.vm_subnets[0].id
+  network_security_group_id = azurerm_network_security_group.vm_nsg.id
+}
 
-# resource "azurerm_subnet_network_security_group_association" "zone2_vm_nsg" {
-#   subnet_id                 = azurerm_subnet.vm_subnets[1].id
-#   network_security_group_id = azurerm_network_security_group.vm_nsg.id
-# }
+resource "azurerm_subnet_network_security_group_association" "zone2_vm_nsg" {
+  subnet_id                 = azurerm_subnet.vm_subnets[1].id
+  network_security_group_id = azurerm_network_security_group.vm_nsg.id
+}
+
+resource "azurerm_subnet_network_security_group_association" "zone2_pubsub" {
+  subnet_id                 = azurerm_subnet.agw_subnet.id
+  network_security_group_id = azurerm_network_security_group.vm_nsg.id
+}
 
 # #---- nsg for the databases----#
-# resource "azurerm_network_security_group" "db_nsg" {
-#   name                = "database-nsg"
-#   location            = data.azurerm_resource_group.main.location
-#   resource_group_name = data.azurerm_resource_group.main.name
-#     // add rules after creation of database. allow inbound traffic from the virtual machines and bastion only. allow outbound traffic to nat gateway only - maybe allow outbound to vm and bastion
+resource "azurerm_network_security_group" "db_nsg" {
+  name                = "database-nsg"
+  location            = data.azurerm_resource_group.main.location
+  resource_group_name = data.azurerm_resource_group.main.name
+    // add rules after creation of database. allow inbound traffic from the virtual machines and bastion only. allow outbound traffic to nat gateway only - maybe allow outbound to vm and bastion
 
-#     security_rule {
-#     name                       = "allow-db-from-vm"
-#     priority                   = 100
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "Tcp"
-#     source_port_range          = "*"
-#     destination_port_range     = "3306"  # MySQL Port (adjust if using SQL Server, PostgreSQL, etc.)
-#     source_address_prefix      = "*"  # Replace with actual subnet CIDR
-#     destination_address_prefix = "*"
-#   }
+  security_rule {
+  name                       = "Allow-ssh-from-bastion-and-vms"
+  priority                   = 100
+  direction                  = "Inbound"
+  access                     = "Allow"
+  protocol                  = "Tcp"
+  source_port_range         = "*"
+  destination_port_range    = "22"  # SSH port
+  source_address_prefix     = var.full_cidr[0]  # Use the VNet CIDR block (10.0.0.0/16)
+  destination_address_prefix = "*"
+  description               = "Allow SSH access from Bastion and VMs within the VNet"
+}
+}
 
-#   security_rule {
-#     name                       = "allow-db-from-app-gw"
-#     priority                   = 110
-#     direction                  = "Inbound"
-#     access                     = "Allow"
-#     protocol                   = "Tcp"
-#     source_port_range          = "*"
-#     destination_port_range     = "3306"  # MySQL Port (adjust if using SQL Server, PostgreSQL, etc.)
-#     source_address_prefix      = "*"
-#     destination_address_prefix = "*"
-#   }
+#2 blocks to associate nsg with subnets the db are located in
+resource "azurerm_subnet_network_security_group_association" "zone1_db_nsg" {
+  subnet_id                 = azurerm_subnet.db_subnets[0].id
+  network_security_group_id = azurerm_network_security_group.db_nsg.id
+}
 
-#   security_rule {
-#     name                       = "deny-all-db"
-#     priority                   = 130
-#     direction                  = "Inbound"
-#     access                     = "Deny"
-#     protocol                   = "*"
-#     source_port_range          = "*"
-#     destination_port_range     = "*"
-#     source_address_prefix      = "*"
-#     destination_address_prefix = "*"
-#   }
-# }
-
-# #2 blocks to associate nsg with subnets the db are located in
-# resource "azurerm_subnet_network_security_group_association" "zone1_db_nsg" {
-#   subnet_id                 = azurerm_subnet.db_subnets[0].id
-#   network_security_group_id = azurerm_network_security_group.db_nsg.id
-# }
-
-# resource "azurerm_subnet_network_security_group_association" "zone2_db_nsg" {
-#   subnet_id                 = azurerm_subnet.db_subnets[1].id
-#   network_security_group_id = azurerm_network_security_group.db_nsg.id
-# }
+resource "azurerm_subnet_network_security_group_association" "zone2_db_nsg" {
+  subnet_id                 = azurerm_subnet.db_subnets[1].id
+  network_security_group_id = azurerm_network_security_group.db_nsg.id
+}
 
 # #---------------------------- bastion & IP -----------------------------#
 // includes all things bastion
@@ -740,7 +709,9 @@ data "azurerm_client_config" "current" {}
 resource "azurerm_key_vault_access_policy" "kv_access_policy" {
   key_vault_id = azurerm_key_vault.key_vault.id
   tenant_id    = "16983dae-9f48-4a35-b9f5-0519bf3cdf09"
-  object_id    = "7b599db4-a713-4a7e-9c06-8b62bf11eed2"
+  //object_id    = "7b599db4-a713-4a7e-9c06-8b62bf11eed2"    // for service principal terraform
+  object_id    = "900a20af-26d8-47b0-85d0-b1437c8af627"      // for user - use this one
+
 
   key_permissions = [
     "Get", "List", "Create", "Update", "Import"
