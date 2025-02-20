@@ -24,9 +24,12 @@
 // create diagnostic logs to montior the traffic
 
 // might need a public endpoint to ping db from vm
-
-
+##### didnt figure it out, try using security groups
 ## !!! add route table in public subnets with hop type as "internet"
+
+## try using redis cache for database
+## try creating a new subscription before making a flexible mysql server/database
+
 
 locals {
   zones = ["1", "2"]
