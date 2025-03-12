@@ -514,42 +514,119 @@ resource "azurerm_subnet_network_security_group_association" "bastion_nsg_associ
   network_security_group_id = azurerm_network_security_group.bastion_nsg.id
 }
 
-#---- nsg for the application gateway----#
+#---- nsg for the application gateway subnet ----#
 resource "azurerm_network_security_group" "agw_nsg" {
-  name                        = "application-gateway-network-security-group"
+  name                        = "nsg-app-gateway-subnet"
   location                    = data.azurerm_resource_group.main.location
   resource_group_name         = data.azurerm_resource_group.main.name
- 
-// add skurty rules
+
+      # -- inbound rules -- #
+
+  security_rule {
+    name                       = "Allow-PrivateVM-to-AppGateway"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = local.vm_subnets[1].address_prefixes  # Replace with the CIDR of the Private VNet
+    destination_address_prefix = "VirtualNetwork"  # Allow communication with any resource in the virtual network
+  }
+
+    # -- outbound rules -- #
+
+  security_rule {
+    name                       = "Allow-PrivateVM-to-Internet"
+    priority                   = 120
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = local.vm_subnets[1].address_prefixes  # Replace with the CIDR of the Private VNet
+    destination_address_prefix = "0.0.0.0/0"  # Allow internet access
+  }
 
 }
 
-// block associates the Bastion NSG with the Bastion subnet
 resource "azurerm_subnet_network_security_group_association" "agw_nsg_association" {
   subnet_id                 = azurerm_subnet.agw_subnet.id
   network_security_group_id = azurerm_network_security_group.agw_nsg.id
 }
 
-#---- nsg for the virtual machines----#
-# resource "azurerm_network_security_group" "vm_nsg" {
-#   name                = "virtual-machine-nsg"
-#   location            = data.azurerm_resource_group.main.location
-#   resource_group_name = data.azurerm_resource_group.main.name   
-#   // add rules after creation of vms/ allow inbound traffic from load balancer, database and bastion only. allow outbound traffic to everywhere
+#---- nsg for the private virtual machines subnet ----#
+resource "azurerm_network_security_group" "vm_nsg" {
+  name                = "nsg-private-vm-subnet"
+  location            = data.azurerm_resource_group.main.location
+  resource_group_name = data.azurerm_resource_group.main.name   
+
+  # -- inbound rules -- #
+ // should allow traffic from the agw subnet
+
+  # -- outbound rules -- #
+
+   security_rule {
+    name                       = "Allow-Internet-Outbound"
+    priority                   = 100
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "Allow-VM-to-NAT-Gateway"
+    priority                   = 110
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = azurerm_public_ip.public_ip_nat_zone2.ip_address  #  NAT Gateway's public IP
+  }
+
+  security_rule {
+    name                       = "Allow-Azure-Services"
+    priority                   = 120
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "53"  # For DNS traffic
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "168.63.129.16"  # Azure DNS & Management IP
+  }
+
+  security_rule {
+    name                       = "Allow-Internet-Access"
+    priority                   = 130
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "0.0.0.0/0"  # Allow internet access
+  }
   
-# }
+}
 
 
-# #2 blocks to associate nsg with subnets the vms are located in
-# resource "azurerm_subnet_network_security_group_association" "zone1_association" {
-#   subnet_id                 = azurerm_subnet.vm_subnets[0].id
-#   network_security_group_id = azurerm_network_security_group.vm_nsg.id
-# }
+#2 blocks to associate nsg with subnets the vms are located in
+resource "azurerm_subnet_network_security_group_association" "zone1_association" {
+  subnet_id                 = azurerm_subnet.vm_subnets[0].id
+  network_security_group_id = azurerm_network_security_group.vm_nsg.id
+}
 
-# resource "azurerm_subnet_network_security_group_association" "zone2_association" {
-#   subnet_id                 = azurerm_subnet.vm_subnets[1].id
-#   network_security_group_id = azurerm_network_security_group.vm_nsg.id
-# }
+resource "azurerm_subnet_network_security_group_association" "zone2_association" {
+  subnet_id                 = azurerm_subnet.vm_subnets[1].id
+  network_security_group_id = azurerm_network_security_group.vm_nsg.id
+}
 
 
 # # #---- nsg for the databases----#
