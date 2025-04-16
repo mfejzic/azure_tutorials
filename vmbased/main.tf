@@ -15,20 +15,14 @@
 
 ##
 
-// adjust app gateway
-
 // download ecommerce website and host it
 
 // create diagnostic logs to montior the traffic
 
 // might need a public endpoint to ping db from vm
-##### didnt figure it out, try using security groups
 ## !!! add route table in public subnets with hop type as "internet"
 
 ## try using redis cache for database
-
-
-## Ensure that the NSG for the Bastion subnet allows inbound connections on port 3389 for RDP and 22 for SSH. !!!
 
 
 locals {
@@ -106,10 +100,12 @@ locals {
 #   location = var.uswest3
 # }
 
+# refer to existing resorce group
 data "azurerm_resource_group" "main" {
   name = "vmbased-vnet"
 }
 
+# block creates new network
 resource "azurerm_virtual_network" "vnet" {
   name                = "vmbased"
   location            = data.azurerm_resource_group.main.location
@@ -122,13 +118,17 @@ resource "azurerm_virtual_network" "vnet" {
 
 // create private subnets for the linux virtual machines
 resource "azurerm_subnet" "vm_subnets" {
-  count = length(local.vm_subnets)
+  count = length(local.vm_subnets)                                           // spans all zones
   name = local.vm_subnets[count.index].name
   resource_group_name = data.azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes = [local.vm_subnets[count.index].address_prefixes]
 
-  depends_on = [ azurerm_virtual_network.vnet ]
+  address_prefixes = [
+    local.vm_subnets[count.index].address_prefixes                         // refers to address prefix in locals block
+  ]
+  depends_on = [ 
+    azurerm_virtual_network.vnet 
+  ]
 }
 
 // create private subnets for the sql databases
@@ -137,7 +137,10 @@ resource "azurerm_subnet" "db_subnets" {
   name = local.db_subnets[count.index].name
   resource_group_name = data.azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes = [local.db_subnets[count.index].address_prefixes]
+
+  address_prefixes = [
+    local.db_subnets[count.index].address_prefixes
+  ]
 
    delegation {
     name = "fs"
@@ -149,7 +152,9 @@ resource "azurerm_subnet" "db_subnets" {
     }
   }
 
-  depends_on = [ azurerm_virtual_network.vnet ]
+  depends_on = [ 
+    azurerm_virtual_network.vnet 
+  ]
 }
 
 
@@ -157,22 +162,30 @@ resource "azurerm_subnet" "db_subnets" {
 
 // public subnet for azure bastion
 resource "azurerm_subnet" "bastion_subnet" {
-  name = local.public_subnets[0].name
+  name = local.public_subnets[0].name                                                        // [0] refers to bastion subnet
   resource_group_name = data.azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes = [local.public_subnets[0].address_prefixes]
 
-  depends_on = [ azurerm_virtual_network.vnet ]
+  address_prefixes = [
+    local.public_subnets[0].address_prefixes
+  ]
+  depends_on = [ 
+    azurerm_virtual_network.vnet 
+  ]
 }
 
 // public subnet for application gateway
 resource "azurerm_subnet" "agw_subnet" {
-  name = local.public_subnets[1].name
+  name = local.public_subnets[1].name                                                     // [1] refers to gateway subnet
   resource_group_name = data.azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes = [local.public_subnets[1].address_prefixes]
 
-  depends_on = [ azurerm_virtual_network.vnet ]
+  address_prefixes = [
+    local.public_subnets[1].address_prefixes
+  ]
+  depends_on = [ 
+    azurerm_virtual_network.vnet 
+  ]
 }
 
 #-------------------------------- nat gateway & associations ------------------------------------#
@@ -181,13 +194,14 @@ resource "azurerm_subnet" "agw_subnet" {
 
 #----- nat gateway for bastion subnet, or zone 1 subnet -----#
 resource "azurerm_nat_gateway" "nat_gateway_zone1" {
-  name                = "NATgateway-for-zone1"                                     // bastion host is located in zone 1
+  name                = "zone1-NAT"                                     // bastion host is located in zone 1
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   zones = [ "1" ]
 
-  depends_on = [ azurerm_virtual_network.vnet ]
-  
+  depends_on = [ 
+    azurerm_virtual_network.vnet 
+  ]
 }
 
 //associate NAT Gateway to bastion subnet
@@ -195,12 +209,14 @@ resource "azurerm_subnet_nat_gateway_association" "bastion_subnet" {
   subnet_id           = azurerm_subnet.bastion_subnet.id
   nat_gateway_id      = azurerm_nat_gateway.nat_gateway_zone1.id
 
-  depends_on = [ azurerm_subnet.bastion_subnet, azurerm_nat_gateway.nat_gateway_zone1 ]        // needs bastion subnet and NAT gateway
+  depends_on = [ 
+    azurerm_subnet.bastion_subnet, azurerm_nat_gateway.nat_gateway_zone1               // needs bastion subnet and NAT gateway
+  ]
 }
 
-//this creates a public IP for this nat gateway
-resource "azurerm_public_ip" "public_ip_nat_zone1" {
-  name                = "public-ip-ngw-zone1"   
+//block creates a public IP for this nat gateway
+resource "azurerm_public_ip" "nat_zone1" {
+  name                = "NAT-zone1"   
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   allocation_method   = "Static"
@@ -208,37 +224,44 @@ resource "azurerm_public_ip" "public_ip_nat_zone1" {
   zones = [ "1" ]
   //zones               = each.value == "public-subnet-zone1" ? ["1"] : ["2"]     //assigning the IP to a each zone (zone 1 for public-subnet-zone1, zone 2 for public-subnet-zone2)
 
-  depends_on = [ azurerm_virtual_network.vnet ]
+  depends_on = [ 
+    azurerm_virtual_network.vnet 
+  ]
 }
 
 // associate nat gateway with the public IP above
 resource "azurerm_nat_gateway_public_ip_association" "nat_to_ip_association1" {
   nat_gateway_id      = azurerm_nat_gateway.nat_gateway_zone1.id
-  public_ip_address_id = azurerm_public_ip.public_ip_nat_zone1.id
+  public_ip_address_id = azurerm_public_ip.nat_zone1.id
 
-  depends_on = [ azurerm_public_ip.public_ip_nat_zone1, azurerm_nat_gateway.nat_gateway_zone1 ]
+  depends_on = [ 
+    azurerm_public_ip.nat_zone1, azurerm_nat_gateway.nat_gateway_zone1 
+  ]
 }
 
 
 #----- this creates a nat gateway for agw subnet, or zone 2 subnet -----#
 resource "azurerm_nat_gateway" "nat_gateway_zone2" {
-  name                = "NATgateway-for-zone2"
+  name                = "zone2-NAT"
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   zones = [ "2" ]
 
-  depends_on = [ azurerm_virtual_network.vnet ]
-  
+  depends_on = [ 
+    azurerm_virtual_network.vnet 
+  ]
 }
 
-//associates NAT Gateway to zone 2 subnets, includes the agw public subnet, and private vm subnet
+//associates NAT Gateway to app gateway subnet, or public zone 2 subnet
 resource "azurerm_subnet_nat_gateway_association" "agw_subnet" {
   subnet_id           = azurerm_subnet.agw_subnet.id
   nat_gateway_id      = azurerm_nat_gateway.nat_gateway_zone2.id
 
-  depends_on = [ azurerm_subnet.agw_subnet, azurerm_nat_gateway.nat_gateway_zone2 ]        // needs agw subnet and nat gateway
+  depends_on = [ 
+    azurerm_subnet.agw_subnet, azurerm_nat_gateway.nat_gateway_zone2                     // needs agw subnet and nat gateway
+  ]
 }
-resource "azurerm_subnet_nat_gateway_association" "zone2_vm_subnet" {
+resource "azurerm_subnet_nat_gateway_association" "zone2_vm_subnet" {                      // ?????? private subnet not need NAT, verify and delete this block
   subnet_id           = azurerm_subnet.vm_subnets[1].id
   nat_gateway_id      = azurerm_nat_gateway.nat_gateway_zone2.id
 
@@ -246,83 +269,88 @@ resource "azurerm_subnet_nat_gateway_association" "zone2_vm_subnet" {
 }
 
 // this creates a public IP for the zone 2 nat gateway
-resource "azurerm_public_ip" "public_ip_nat_zone2" {
-  name                = "public-ip-ngw-zone2"   // add random number
+resource "azurerm_public_ip" "nat_zone2" {
+  name                = "NAT-zone2"   // add random number if using count 
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   allocation_method   = "Static"
   sku                  = "Standard"
   zones = [ "2" ]
-  //zones               = each.value == "public-subnet-zone1" ? ["1"] : ["2"]     //assigning the IP to a each zone (zone 1 for public-subnet-zone1, zone 2 for public-subnet-zone2)
+  //zones               = each.value == "public-subnet-zone1" ? ["1"] : ["2"]     //assigning the IP to a each zone (zone 1 for public-subnet-zone1, zone 2 for public-subnet-zone2) - use this if using count attribute
 
-  depends_on = [ azurerm_virtual_network.vnet ]
+  depends_on = [ 
+    azurerm_virtual_network.vnet 
+  ]
 }
 
 // associate nat gateway with the public IP above
 resource "azurerm_nat_gateway_public_ip_association" "nat_to_ip_association2" {
   nat_gateway_id      = azurerm_nat_gateway.nat_gateway_zone2.id
-  public_ip_address_id = azurerm_public_ip.public_ip_nat_zone2.id
+  public_ip_address_id = azurerm_public_ip.nat_zone2.id
 
-  depends_on = [ azurerm_public_ip.public_ip_nat_zone2, azurerm_nat_gateway.nat_gateway_zone2 ]
+  depends_on = [ 
+    azurerm_public_ip.nat_zone2, azurerm_nat_gateway.nat_gateway_zone2 
+  ]
 }
-
-
-
 
 
 #----------------------------------- zone 1 private route tables ------------------------------------#
 
 resource "azurerm_route_table" "route_tables_zone1" {
-  name                = "route-from-zone1"
+  name                = "zone1-to-internet"                          
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
 
   route {
     name                   = "nat-access"                             // Route for internet access via NAT Gateway
     address_prefix         = var.all_cidr
-    next_hop_type          = "Internet"                                    // use internet                     virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
+    next_hop_type          = "Internet"                                    // use internet                     virtual applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
     //next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_zone1.ip_address   //NAT Gateway for internet access - comment this out if using internet
   }
 
-  depends_on = [ azurerm_public_ip.public_ip_nat_zone1, azurerm_nat_gateway.nat_gateway_zone1 ]
+  depends_on = [ 
+    azurerm_public_ip.nat_zone1, azurerm_nat_gateway.nat_gateway_zone1 
+  ]
 }
 
 #------- route table associations --------#
 resource "azurerm_subnet_route_table_association" "zone1_rt_association_vm" {
-  subnet_id      = azurerm_subnet.vm_subnets[0].id                   //Private VM subnet in zone 1 (index 1)
+  subnet_id      = azurerm_subnet.vm_subnets[0].id                   //Private VM subnet in zone 1
   route_table_id = azurerm_route_table.route_tables_zone1.id
 }
 
 resource "azurerm_subnet_route_table_association" "zone1_rt_association_db" {
-  subnet_id      = azurerm_subnet.db_subnets[0].id                  //Private DB subnet in zone 1 (index 2)
+  subnet_id      = azurerm_subnet.db_subnets[0].id                  //Private DB subnet in zone 1 
   route_table_id = azurerm_route_table.route_tables_zone1.id
 }
 
 #-------------------------------------- zone 2 private route tables -------------------------------------#
 
 resource "azurerm_route_table" "route_tables_zone2" {
-  name                = "route-from-zone2"
+  name                = "zone2-to-internet"
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
 
   route {
     name                   = "nat-access"                             // Route to internet via NAT Gateway
     address_prefix         = var.all_cidr
-    next_hop_type          = "Internet"                                    // virtal applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
+    next_hop_type          = "Internet"                                    // virtual applicance routes traffic to an azure service - requires next_hop_in_ip_address - define nat gateways public IP
     //next_hop_in_ip_address = azurerm_public_ip.public_ip_nat_zone2.ip_address  //NAT Gateway for internet access - comment this out if using internet
   }
 
-  depends_on = [ azurerm_public_ip.public_ip_nat_zone2, azurerm_nat_gateway.nat_gateway_zone2 ]
+  depends_on = [ 
+    azurerm_public_ip.nat_zone2, azurerm_nat_gateway.nat_gateway_zone2 
+  ]
 }
 
 #------- route table associations --------#
 resource "azurerm_subnet_route_table_association" "zone2_rt_association_vm" {
-  subnet_id      = azurerm_subnet.vm_subnets[1].id                         //Private VM subnet in zone 2 (index 1)
+  subnet_id      = azurerm_subnet.vm_subnets[1].id                         //Private VM subnet in zone 2
   route_table_id = azurerm_route_table.route_tables_zone2.id
 }
 
 resource "azurerm_subnet_route_table_association" "zone2_rt_association_db" {
-  subnet_id      = azurerm_subnet.db_subnets[1].id                         //Private DB subnet in zone 2 (index 2)
+  subnet_id      = azurerm_subnet.db_subnets[1].id                         //Private DB subnet in zone 2 
   route_table_id = azurerm_route_table.route_tables_zone2.id
 }
 
@@ -505,22 +533,21 @@ resource "azurerm_network_security_group" "bastion_nsg" {
     source_port_range         = "*"
     description               = "Allow outbound traffic to Internet on port 80"
   }
-
 }
 
 // block associates the Bastion NSG with the Bastion subnet
-resource "azurerm_subnet_network_security_group_association" "bastion_nsg_association" {
+resource "azurerm_subnet_network_security_group_association" "bastion" {
   subnet_id                 = azurerm_subnet.bastion_subnet.id
   network_security_group_id = azurerm_network_security_group.bastion_nsg.id
 }
 
 #---- nsg for the application gateway subnet ----#
-resource "azurerm_network_security_group" "agw_nsg" {
-  name                        = "nsg-app-gateway-subnet"
+resource "azurerm_network_security_group" "appgateway_nsg" {
+  name                        = "nsg-AppGateway"
   location                    = data.azurerm_resource_group.main.location
   resource_group_name         = data.azurerm_resource_group.main.name
 
-      # -- inbound rules -- #
+  # -- inbound rules -- #
 
   security_rule {
     name                       = "Allow-PrivateVM-to-AppGateway"
@@ -534,7 +561,7 @@ resource "azurerm_network_security_group" "agw_nsg" {
     destination_address_prefix = "VirtualNetwork"  # Allow communication with any resource in the virtual network
   }
 
-    # -- outbound rules -- #
+  # -- outbound rules -- #
 
   security_rule {
     name                       = "Allow-PrivateVM-to-Internet"
@@ -547,17 +574,16 @@ resource "azurerm_network_security_group" "agw_nsg" {
     source_address_prefix      = local.vm_subnets[1].address_prefixes  # Replace with the CIDR of the Private VNet
     destination_address_prefix = "0.0.0.0/0"  # Allow internet access
   }
-
 }
 
-resource "azurerm_subnet_network_security_group_association" "agw_nsg_association" {
+resource "azurerm_subnet_network_security_group_association" "appgateway" {
   subnet_id                 = azurerm_subnet.agw_subnet.id
-  network_security_group_id = azurerm_network_security_group.agw_nsg.id
+  network_security_group_id = azurerm_network_security_group.appgateway_nsg.id
 }
 
 #---- nsg for the private virtual machines subnet ----#
 resource "azurerm_network_security_group" "vm_nsg" {
-  name                = "nsg-private-vm-subnet"
+  name                = "nsg-VirtualMachines"
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name   
 
@@ -565,6 +591,7 @@ resource "azurerm_network_security_group" "vm_nsg" {
  // should allow traffic from the agw subnet
 
   # -- outbound rules -- #
+  // should outbound to all network resources and internet
 
    security_rule {
     name                       = "Allow-Internet-Outbound"
@@ -587,7 +614,7 @@ resource "azurerm_network_security_group" "vm_nsg" {
     source_port_range          = "*"
     destination_port_range     = "*"
     source_address_prefix      = "VirtualNetwork"
-    destination_address_prefix = azurerm_public_ip.public_ip_nat_zone2.ip_address  #  NAT Gateway's public IP
+    destination_address_prefix = azurerm_public_ip.nat_zone2.ip_address  #  NAT Gateway's public IP
   }
 
   security_rule {
@@ -613,57 +640,60 @@ resource "azurerm_network_security_group" "vm_nsg" {
     source_address_prefix      = "VirtualNetwork"
     destination_address_prefix = "0.0.0.0/0"  # Allow internet access
   }
-  
 }
 
-
 #2 blocks to associate nsg with subnets the vms are located in
-resource "azurerm_subnet_network_security_group_association" "zone1_association" {
+resource "azurerm_subnet_network_security_group_association" "zone1_vm" {
   subnet_id                 = azurerm_subnet.vm_subnets[0].id
   network_security_group_id = azurerm_network_security_group.vm_nsg.id
 }
 
-resource "azurerm_subnet_network_security_group_association" "zone2_association" {
+resource "azurerm_subnet_network_security_group_association" "zone2_vm" {
   subnet_id                 = azurerm_subnet.vm_subnets[1].id
   network_security_group_id = azurerm_network_security_group.vm_nsg.id
 }
 
 
-# # #---- nsg for the databases----#
-# resource "azurerm_network_security_group" "db_nsg" {
-#   name                = "database-nsg"
-#   location            = data.azurerm_resource_group.main.location
-#   resource_group_name = data.azurerm_resource_group.main.name
-#     // add rules after creation of database. allow inbound traffic from the virtual machines and bastion only. allow outbound traffic to nat gateway only - maybe allow outbound to vm and bastion
+#---- nsg for the databases----#
+resource "azurerm_network_security_group" "db_nsg" {
+  name                = "nsg-Databases"
+  location            = data.azurerm_resource_group.main.location
+  resource_group_name = data.azurerm_resource_group.main.name
+    // allow inbound traffic from the virtual machines and bastion only. allow outbound traffic to nat gateway only - maybe allow outbound to vm and bastion
+  # -- inbound rules -- #
 
-#   security_rule {
-#   name                       = "Allow-ssh-from-bastion-and-vms"
-#   priority                   = 100
-#   direction                  = "Inbound"
-#   access                     = "Allow"
-#   protocol                  = "Tcp"
-#   source_port_range         = "*"
-#   destination_port_range    = "22"  # SSH port
-#   source_address_prefix     = var.full_cidr[0]  # Use the VNet CIDR block (10.0.0.0/16)
-#   destination_address_prefix = "*"
-#   description               = "Allow SSH access from Bastion and VMs within the VNet"
-# }
-# }
+  security_rule {
+  name                       = "Allow-ssh-from-bastion-and-vms"
+  priority                   = 100
+  direction                  = "Inbound"
+  access                     = "Allow"
+  protocol                  = "Tcp"
+  source_port_range         = "*"
+  destination_port_range    = "22"  # SSH port
+  source_address_prefix     = var.full_cidr[0]  # Use the VNet CIDR block (10.0.0.0/16)
+  destination_address_prefix = "*"
+  description               = "Allow SSH access from Bastion and VMs within the VNet"
+  }
 
-# #2 blocks to associate nsg with subnets the db are located in
-# resource "azurerm_subnet_network_security_group_association" "zone1_db_nsg" {
-#   subnet_id                 = azurerm_subnet.db_subnets[0].id
-#   network_security_group_id = azurerm_network_security_group.db_nsg.id
-# }
+  # -- outbound rules -- #
 
-# resource "azurerm_subnet_network_security_group_association" "zone2_db_nsg" {
-#   subnet_id                 = azurerm_subnet.db_subnets[1].id
-#   network_security_group_id = azurerm_network_security_group.db_nsg.id
-# }
+}
 
-# #---------------------------- bastion & IP -----------------------------#
+#2 blocks to associate nsg with subnets the db are located in
+resource "azurerm_subnet_network_security_group_association" "zone1_db" {
+  subnet_id                 = azurerm_subnet.db_subnets[0].id
+  network_security_group_id = azurerm_network_security_group.db_nsg.id
+}
+
+resource "azurerm_subnet_network_security_group_association" "zone2_db" {
+  subnet_id                 = azurerm_subnet.db_subnets[1].id
+  network_security_group_id = azurerm_network_security_group.db_nsg.id
+}
+
+#---------------------------- bastion & IP -----------------------------#
 // includes all things bastion
 
+# block creates bastion host
 resource "azurerm_bastion_host" "bastion" {
   //for_each = toset(local.public_subnets)                                // 1 bastion per vnet
   name                     = "bastion"
@@ -674,12 +704,13 @@ resource "azurerm_bastion_host" "bastion" {
 
   ip_configuration {
     name = "ip_config"
-    public_ip_address_id = azurerm_public_ip.public_ip_bastion.id
+    public_ip_address_id = azurerm_public_ip.bastion.id
     subnet_id = azurerm_subnet.bastion_subnet.id
   }
 }
 
-resource "azurerm_public_ip" "public_ip_bastion" {
+# creates public ip for bastion
+resource "azurerm_public_ip" "bastion" {
   //for_each            = toset(local.public_subnets)                         //Iterate over the public subnets
   name                = "bastion-ip"
   location            = data.azurerm_resource_group.main.location
@@ -689,81 +720,81 @@ resource "azurerm_public_ip" "public_ip_bastion" {
 }
 
 
-# #---------------------------- application gateway -----------------------------#
+#---------------------------- application gateway -----------------------------#
 
 # Public IP for the Load Balancer
-# resource "azurerm_public_ip" "app_gateway_IP" {
-#   name                = "application-gateway-public-IP"
-#   location            = data.azurerm_resource_group.main.location
-#   resource_group_name = data.azurerm_resource_group.main.name
-#   allocation_method   = "Static"
-#   sku = "Standard"
-#   zones = [ "1", "2" ]                                               // zonal public IP - must include same zones as agw
-# }
+resource "azurerm_public_ip" "app_gateway" {
+  name                = "application-gateway-public-IP"
+  location            = data.azurerm_resource_group.main.location
+  resource_group_name = data.azurerm_resource_group.main.name
+  allocation_method   = "Static"
+  sku = "Standard"
+  zones = [ "1", "2" ]                                               // zonal public IP - must include same zones as agw ???? why 2 zones?
+}
 
-# resource "azurerm_application_gateway" "app_gateway" {
-#   name = "application-gateway"
-#   location = data.azurerm_resource_group.main.location
-#   resource_group_name = data.azurerm_resource_group.main.name
-#   zones = [ "1", "2" ]                                             // must include zones in public IP
+resource "azurerm_application_gateway" "app_gateway" {
+  name = "application-gateway"
+  location = data.azurerm_resource_group.main.location
+  resource_group_name = data.azurerm_resource_group.main.name
+  zones = [ "1", "2" ]                                             // must include zones in public IP
 
-#   gateway_ip_configuration {
-#     name = "gateway_ip"                            // create new private subnet for this
-#     subnet_id = azurerm_subnet.agw_subnet.id
-#   }
+  gateway_ip_configuration {
+    name = "gateway_ip"                            // create new private subnet for this
+    subnet_id = azurerm_subnet.agw_subnet.id
+  }
   
-#   frontend_ip_configuration {
-#     name = local.frontend_ip_configuration_name
-#     public_ip_address_id = azurerm_public_ip.app_gateway_IP.id
-#     //subnet_id = azurerm_subnet.agw_subnet.id
-#   }
+  frontend_ip_configuration {
+    name = local.frontend_ip_configuration_name
+    public_ip_address_id = azurerm_public_ip.app_gateway.id
+    //subnet_id = azurerm_subnet.agw_subnet.id
+  }
 
-#   frontend_port {
-#     name = local.frontend_port_name
-#     port = 80
-#   }
+  frontend_port {
+    name = local.frontend_port_name
+    port = 80
+  }
 
-#   http_listener {
-#     name = local.listener_name
-#     protocol = "Http"
-#     frontend_ip_configuration_name = local.frontend_ip_configuration_name
-#     frontend_port_name = local.frontend_port_name
-#   }
+  http_listener {
+    name = local.listener_name
+    protocol = "Http"
+    frontend_ip_configuration_name = local.frontend_ip_configuration_name
+    frontend_port_name = local.frontend_port_name
+  }
 
-#   backend_http_settings {
-#     name = local.http_setting_name
-#     protocol = "Http"
-#     port = 80
-#     cookie_based_affinity = "Disabled"
-    
-#   }
+  backend_http_settings {
+    name = local.http_setting_name
+    protocol = "Http"
+    port = 80
+    cookie_based_affinity = "Disabled"
+  }
 
-#   request_routing_rule {
-#     name = local.request_routing_rule_name
-#     http_listener_name = local.listener_name
-#     rule_type = "Basic"
-#     backend_address_pool_name = local.backend_address_pool_name
-#     backend_http_settings_name = local.http_setting_name
-#     priority = 1
-#   }
+  request_routing_rule {
+    name = local.request_routing_rule_name
+    http_listener_name = local.listener_name
+    rule_type = "Basic"
+    backend_address_pool_name = local.backend_address_pool_name
+    backend_http_settings_name = local.http_setting_name
+    priority = 1
+  }
 
-#   backend_address_pool {
-#     name = local.backend_address_pool_name 
-#     ip_addresses = [                                                // refer to the vm scale set network interface cards
-#     azurerm_network_interface.vmss.private_ip_address,
-#     azurerm_network_interface.vmss_2.private_ip_address]  
-#   }
-#   sku {
-#     name     = "Standard_v2" 
-#     tier     = "Standard_v2"
-#     //capacity = 2                                              // exclusive with autoscale_configuration
-    
-#   }
-#   autoscale_configuration {
-#     min_capacity = 2
-#     max_capacity = 12
-#   }
-# }
+  backend_address_pool {
+    name = local.backend_address_pool_name 
+    ip_addresses = [                                                // refer to the vm scale set network interface cards
+    azurerm_network_interface.vmss.private_ip_address,
+    azurerm_network_interface.vmss_2.private_ip_address]  
+  }
+
+  sku {
+    name     = "Standard_v2" 
+    tier     = "Standard_v2"
+    //capacity = 2                                              // exclusive with autoscale_configuration
+  }
+
+  autoscale_configuration {
+    min_capacity = 2
+    max_capacity = 12
+  }
+}
 
 #----------------------------------- key vault & private key --------------------------------------#
 
@@ -809,23 +840,25 @@ resource "azurerm_key_vault" "key_vault" {
   # }
 }
 
-# Store the public SSH key in Key Vault (Optional)
+# Store the public SSH key in Key Vault
 resource "azurerm_key_vault_secret" "public_key" {
   name         = "private-key"
   value        = tls_private_key.tls_private_key.private_key_pem
   key_vault_id = azurerm_key_vault.key_vault.id
 
-  depends_on = [ azurerm_key_vault.key_vault, 
-  azurerm_key_vault_access_policy.user1_kv_access_policy, 
-  azurerm_key_vault_access_policy.local_machine_kv_access_policy, 
-  azurerm_key_vault_access_policy.terraform_kv_access_policy ]
+  depends_on = [ 
+    azurerm_key_vault.key_vault, 
+    azurerm_key_vault_access_policy.user1, 
+    azurerm_key_vault_access_policy.local_machine, 
+    azurerm_key_vault_access_policy.terraform_application
+  ]
 }
 
 data "azurerm_client_config" "current" {}
 
 
 # Access Policy for User 1
-resource "azurerm_key_vault_access_policy" "user1_kv_access_policy" {
+resource "azurerm_key_vault_access_policy" "user1" {
   key_vault_id = azurerm_key_vault.key_vault.id
   tenant_id    = "16983dae-9f48-4a35-b9f5-0519bf3cdf09"
   object_id    = "900a20af-26d8-47b0-85d0-b1437c8af627"  # User 1 object ID
@@ -846,7 +879,7 @@ resource "azurerm_key_vault_access_policy" "user1_kv_access_policy" {
 }
 
 # Access Policy for Local Machine Application
-resource "azurerm_key_vault_access_policy" "local_machine_kv_access_policy" {
+resource "azurerm_key_vault_access_policy" "local_machine" {
   key_vault_id = azurerm_key_vault.key_vault.id
   tenant_id    = "16983dae-9f48-4a35-b9f5-0519bf3cdf09"
   object_id    = "3728e04a-d9d3-4d3c-b503-b287b1aaa666"  # Local Machine object ID
@@ -867,7 +900,7 @@ resource "azurerm_key_vault_access_policy" "local_machine_kv_access_policy" {
 }
 
 # Access Policy for Terraform Service Principal
-resource "azurerm_key_vault_access_policy" "terraform_kv_access_policy" {
+resource "azurerm_key_vault_access_policy" "terraform_application" {
   key_vault_id = azurerm_key_vault.key_vault.id
   tenant_id    = "16983dae-9f48-4a35-b9f5-0519bf3cdf09"
   object_id    = "a4815ff2-fc06-4608-b1c6-9b902ac9ffb3"  # Terraform Service Principal object ID
@@ -890,6 +923,10 @@ resource "azurerm_key_vault_access_policy" "terraform_kv_access_policy" {
 #------------------------------------ linux scale sets ---------------------------------------#
 
 //created two scale sets per subnet for more granular control
+
+# --- zone 1 scale set --- #
+
+# block creates virtual machines that auto scale
 resource "azurerm_linux_virtual_machine_scale_set" "linux_vm" {
   name = "linux-vm"
   location = data.azurerm_resource_group.main.location
@@ -905,7 +942,6 @@ resource "azurerm_linux_virtual_machine_scale_set" "linux_vm" {
   admin_ssh_key {
     public_key = tls_private_key.tls_private_key.public_key_openssh
     username = "Admin0"
-    
   }
 
   source_image_reference {
@@ -941,11 +977,11 @@ resource "azurerm_network_interface" "vmss" {
     subnet_id                     = azurerm_subnet.vm_subnets[0].id
     private_ip_address_allocation = "Dynamic"
   }
-
 }
 
-#---#
+# --- zone 2 scale set --- #
 
+# block creates virtual machines that auto scales
 resource "azurerm_linux_virtual_machine_scale_set" "linux_vm2" {
   //for_each = azurerm_subnet.vm_subnets
   name = "linux-vm2"
@@ -988,7 +1024,6 @@ resource "azurerm_linux_virtual_machine_scale_set" "linux_vm2" {
       subnet_id = azurerm_subnet.vm_subnets[1].id
     }
   }
-
 }
 
 // network interface for second vm scale set - this block is referenced in the agw backend pool private IP
@@ -1002,66 +1037,63 @@ resource "azurerm_network_interface" "vmss_2" {
     subnet_id                     = azurerm_subnet.vm_subnets[1].id
     private_ip_address_allocation = "Dynamic"
   }
-  
 }
 
 
-# # #---------------------------- database server -----------------------------#
+#---------------------------- database server -----------------------------#
 
-
-# resource "azurerm_mysql_flexible_server" "sql_server" {
-#   name                   = "database1-mf37"
-#   resource_group_name    = data.azurerm_resource_group.main.name
-#   location               = data.azurerm_resource_group.main.location
-#   administrator_login    = "admin0"
-#   administrator_password = "Bratunac?13"
-#   sku_name               = "GP_Standard_D2ds_v4"
-#   private_dns_zone_id = azurerm_private_dns_zone.zone.id
-#   delegated_subnet_id = azurerm_subnet.db_subnets[0].id                    // primary server in zone 1
-#   zone = "1"
+resource "azurerm_mysql_flexible_server" "sql_server" {
+  name                   = "database1-mf37"
+  resource_group_name    = data.azurerm_resource_group.main.name
+  location               = data.azurerm_resource_group.main.location
+  administrator_login    = "admin0"
+  administrator_password = "Bratunac?13"
+  sku_name               = "GP_Standard_D2ds_v4"
+  private_dns_zone_id = azurerm_private_dns_zone.zone.id
+  delegated_subnet_id = azurerm_subnet.db_subnets[0].id                    // primary server in zone 1
+  zone = "1"
   
-#   high_availability {
-#     mode = "ZoneRedundant"                                                    // enables standby server in the remaining zone (2)
-#     standby_availability_zone = "2"
-#   }
+  high_availability {
+    mode = "ZoneRedundant"                                                    // enables standby server in the remaining zone (2)
+    standby_availability_zone = "2"
+  }
 
-#   depends_on = [azurerm_private_dns_zone_virtual_network_link.zone_link]
+  depends_on = [
+    azurerm_private_dns_zone_virtual_network_link.zone_link
+  ]
+}
 
-
-# }
-
-# resource "azurerm_mysql_flexible_database" "mysql_database" {
-#   name                = "mysql-flexible-database"
-#   resource_group_name = data.azurerm_resource_group.main.name
-#   server_name         = azurerm_mysql_flexible_server.sql_server.name
-#   charset             = "utf8"
-#   collation           = "utf8_unicode_ci"
-  
-# }
+resource "azurerm_mysql_flexible_database" "mysql_database" {
+  name                = "mysql-flexible-database"
+  resource_group_name = data.azurerm_resource_group.main.name
+  server_name         = azurerm_mysql_flexible_server.sql_server.name
+  charset             = "utf8"
+  collation           = "utf8_unicode_ci"
+}
 
 //set firewall rules to allow access to the MySQL server
-# resource "azurerm_mysql_flexible_server_firewall_rule" "db_server_firewall" {
-#   name                 = "allow-access"
-#   resource_group_name  = data.azurerm_resource_group.main.name
-#   server_name          = azurerm_mysql_flexible_server.sql_server.name
-#   start_ip_address     = "0.0.0.0"  
-#   end_ip_address       = "255.255.255.255"                                       //allow access from any IP (can be more restrictive)
-# }
+resource "azurerm_mysql_flexible_server_firewall_rule" "db_server_firewall" {
+  name                 = "allow-access"
+  resource_group_name  = data.azurerm_resource_group.main.name
+  server_name          = azurerm_mysql_flexible_server.sql_server.name
+  start_ip_address     = "0.0.0.0"  
+  end_ip_address       = "255.255.255.255"                                       //allow access from any IP (can be more restrictive)
+}
 
-# #------------------ private dns zone -------------------#
+#------------------ private dns zone -------------------#
 
 
-# resource "azurerm_private_dns_zone" "zone" {
-#   name                = "mf37.mysql.database.azure.com"
-#   resource_group_name = data.azurerm_resource_group.main.name
-# }
+resource "azurerm_private_dns_zone" "zone" {
+  name                = "mf37.mysql.database.azure.com"
+  resource_group_name = data.azurerm_resource_group.main.name
+}
 
-# resource "azurerm_private_dns_zone_virtual_network_link" "zone_link" {
-#   name                  = "mf37VnetZone.com"
-#   private_dns_zone_name = azurerm_private_dns_zone.zone.name
-#   virtual_network_id    = azurerm_virtual_network.vnet.id
-#   resource_group_name   = data.azurerm_resource_group.main.name
-# }
+resource "azurerm_private_dns_zone_virtual_network_link" "zone_link" {
+  name                  = "mf37VnetZone.com"
+  private_dns_zone_name = azurerm_private_dns_zone.zone.name
+  virtual_network_id    = azurerm_virtual_network.vnet.id
+  resource_group_name   = data.azurerm_resource_group.main.name
+}
 
 
 # #---------------------------- storage accounts -----------------------------#
