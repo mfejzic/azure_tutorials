@@ -1,28 +1,16 @@
-// fix bastion host security group
 // add route 53
 // use a dyanmic website for testing
 
-// ssh into vms from bastion, configure ssh key for vm and nsg for both subnets
-//    fix the security groups for bastion and vm scale set
-// create db after this, ssh into db from bastion and from vm, must work in all zones
-// find prebuilt webpage to population the vm and db, test it with fake traffic
 
-# do these in order
-
-// bastion must communicate with vmss
-// vmss must communicate with db
-// bastion must communicate with db
-
-##
-
-// download ecommerce website and host it
 
 // create diagnostic logs to montior the traffic
 
-// might need a public endpoint to ping db from vm
-## !!! add route table in public subnets with hop type as "internet"
 
 ## try using redis cache for database
+
+## create startup sript to install flask, and upload script and html to each vm
+## !! use manual snapshot of a configured vm, this will be your image !! ##
+  // create a vm on portal with everything installed, capture it, then refernce it in your vmss blocks
 
 
 locals {
@@ -79,7 +67,7 @@ locals {
 
     db_subnets = [
       { name = "private-db-subnet-zone1" , address_prefixes = "10.0.5.0/24" , zone = "1"},
-      { name = "private-db-subnet-zone2" , address_prefixes = "10.0.6.0/24" , zone = "2"}
+      { name = "private-db-subnet-zone2" , address_prefixes = "10.0.6.0/24" , zone = "2"}      // unused, potential later use
     ]
 
 
@@ -93,6 +81,7 @@ locals {
   listener_name                  = "${azurerm_virtual_network.vnet.name}-listener-name"
   request_routing_rule_name      = "${azurerm_virtual_network.vnet.name}-routing-rule"
   redirect_configuration_name    = "${azurerm_virtual_network.vnet.name}-redirect-config"
+    
 }
 
 # resource "azurerm_resource_group" "main" {
@@ -100,10 +89,12 @@ locals {
 #   location = var.uswest3
 # }
 
-# refer to existing resorce group
+# refers to existing resorce group
 data "azurerm_resource_group" "main" {
   name = "vmbased-vnet"
 }
+
+
 
 # block creates new network
 resource "azurerm_virtual_network" "vnet" {
@@ -116,7 +107,7 @@ resource "azurerm_virtual_network" "vnet" {
 
 #----------------------------------- all private subnets ------------------------------------#
 
-// create private subnets for the linux virtual machines
+// create private subnets for the linux virtual machines scale set
 resource "azurerm_subnet" "vm_subnets" {
   count = length(local.vm_subnets)                                           // spans all zones
   name = local.vm_subnets[count.index].name
@@ -349,7 +340,7 @@ resource "azurerm_subnet_route_table_association" "zone2_rt_association_vm" {
   route_table_id = azurerm_route_table.route_tables_zone2.id
 }
 
-resource "azurerm_subnet_route_table_association" "zone2_rt_association_db" {
+resource "azurerm_subnet_route_table_association" "zone2_rt_association_db" {  // change the 1 to a 0, and delete the privatesubnet2 database, actally delete this
   subnet_id      = azurerm_subnet.db_subnets[1].id                         //Private DB subnet in zone 2 
   route_table_id = azurerm_route_table.route_tables_zone2.id
 }
@@ -542,44 +533,44 @@ resource "azurerm_subnet_network_security_group_association" "bastion" {
 }
 
 #---- nsg for the application gateway subnet ----#
-resource "azurerm_network_security_group" "appgateway_nsg" {
-  name                        = "nsg-AppGateway"
-  location                    = data.azurerm_resource_group.main.location
-  resource_group_name         = data.azurerm_resource_group.main.name
+# resource "azurerm_network_security_group" "appgateway_nsg" {
+#   name                        = "nsg-AppGateway"
+#   location                    = data.azurerm_resource_group.main.location
+#   resource_group_name         = data.azurerm_resource_group.main.name
 
-  # -- inbound rules -- #
+#   # -- inbound rules -- #
 
-  security_rule {
-    name                       = "Allow-PrivateVM-to-AppGateway"
-    priority                   = 100
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "*"
-    source_port_range          = "*"
-    destination_port_range     = "*"
-    source_address_prefix      = local.vm_subnets[1].address_prefixes  # Replace with the CIDR of the Private VNet
-    destination_address_prefix = "VirtualNetwork"  # Allow communication with any resource in the virtual network
-  }
+#   security_rule {
+#     name                       = "Allow-PrivateVM-to-AppGateway"
+#     priority                   = 100
+#     direction                  = "Inbound"
+#     access                     = "Allow"
+#     protocol                   = "*"
+#     source_port_range          = "*"
+#     destination_port_range     = "*"
+#     source_address_prefix      = local.vm_subnets[1].address_prefixes  # Replace with the CIDR of the Private VNet
+#     destination_address_prefix = "VirtualNetwork"  # Allow communication with any resource in the virtual network
+#   }
 
-  # -- outbound rules -- #
+#   # -- outbound rules -- #
 
-  security_rule {
-    name                       = "Allow-PrivateVM-to-Internet"
-    priority                   = 120
-    direction                  = "Outbound"
-    access                     = "Allow"
-    protocol                   = "*"
-    source_port_range          = "*"
-    destination_port_range     = "*"
-    source_address_prefix      = local.vm_subnets[1].address_prefixes  # Replace with the CIDR of the Private VNet
-    destination_address_prefix = "0.0.0.0/0"  # Allow internet access
-  }
-}
+#   security_rule {
+#     name                       = "Allow-PrivateVM-to-Internet"
+#     priority                   = 120
+#     direction                  = "Outbound"
+#     access                     = "Allow"
+#     protocol                   = "*"
+#     source_port_range          = "*"
+#     destination_port_range     = "*"
+#     source_address_prefix      = local.vm_subnets[1].address_prefixes  # Replace with the CIDR of the Private VNet
+#     destination_address_prefix = "0.0.0.0/0"  # Allow internet access
+#   }
+# }
 
-resource "azurerm_subnet_network_security_group_association" "appgateway" {
-  subnet_id                 = azurerm_subnet.agw_subnet.id
-  network_security_group_id = azurerm_network_security_group.appgateway_nsg.id
-}
+# resource "azurerm_subnet_network_security_group_association" "appgateway" {
+#   subnet_id                 = azurerm_subnet.agw_subnet.id
+#   network_security_group_id = azurerm_network_security_group.appgateway_nsg.id
+# }
 
 #---- nsg for the private virtual machines subnet ----#
 resource "azurerm_network_security_group" "vm_nsg" {
@@ -590,12 +581,24 @@ resource "azurerm_network_security_group" "vm_nsg" {
   # -- inbound rules -- #
  // should allow traffic from the agw subnet
 
+  security_rule {
+    name                       = "Allow-AppGateway-To-VMs"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = azurerm_subnet.agw_subnet.address_prefixes[0]
+    destination_address_prefix = "*"
+  }
+
   # -- outbound rules -- #
   // should outbound to all network resources and internet
 
    security_rule {
     name                       = "Allow-Internet-Outbound"
-    priority                   = 100
+    priority                   = 110
     direction                  = "Outbound"
     access                     = "Allow"
     protocol                   = "*"
@@ -607,7 +610,7 @@ resource "azurerm_network_security_group" "vm_nsg" {
 
   security_rule {
     name                       = "Allow-VM-to-NAT-Gateway"
-    priority                   = 110
+    priority                   = 120
     direction                  = "Outbound"
     access                     = "Allow"
     protocol                   = "*"
@@ -619,7 +622,7 @@ resource "azurerm_network_security_group" "vm_nsg" {
 
   security_rule {
     name                       = "Allow-Azure-Services"
-    priority                   = 120
+    priority                   = 130
     direction                  = "Outbound"
     access                     = "Allow"
     protocol                   = "*"
@@ -631,7 +634,7 @@ resource "azurerm_network_security_group" "vm_nsg" {
 
   security_rule {
     name                       = "Allow-Internet-Access"
-    priority                   = 130
+    priority                   = 140
     direction                  = "Outbound"
     access                     = "Allow"
     protocol                   = "*"
@@ -654,41 +657,41 @@ resource "azurerm_subnet_network_security_group_association" "zone2_vm" {
 }
 
 
-#---- nsg for the databases----#
-resource "azurerm_network_security_group" "db_nsg" {
-  name                = "nsg-Databases"
-  location            = data.azurerm_resource_group.main.location
-  resource_group_name = data.azurerm_resource_group.main.name
-    // allow inbound traffic from the virtual machines and bastion only. allow outbound traffic to nat gateway only - maybe allow outbound to vm and bastion
-  # -- inbound rules -- #
+# #---- nsg for the databases----#
+# resource "azurerm_network_security_group" "db_nsg" {
+#   name                = "nsg-Databases"
+#   location            = data.azurerm_resource_group.main.location
+#   resource_group_name = data.azurerm_resource_group.main.name
+#     // allow inbound traffic from the virtual machines and bastion only. allow outbound traffic to nat gateway only - maybe allow outbound to vm and bastion
+#   # -- inbound rules -- #
 
-  security_rule {
-  name                       = "Allow-ssh-from-bastion-and-vms"
-  priority                   = 100
-  direction                  = "Inbound"
-  access                     = "Allow"
-  protocol                  = "Tcp"
-  source_port_range         = "*"
-  destination_port_range    = "22"  # SSH port
-  source_address_prefix     = var.full_cidr[0]  # Use the VNet CIDR block (10.0.0.0/16)
-  destination_address_prefix = "*"
-  description               = "Allow SSH access from Bastion and VMs within the VNet"
-  }
+#   security_rule {
+#   name                       = "Allow-ssh-from-bastion-and-vms"
+#   priority                   = 100
+#   direction                  = "Inbound"
+#   access                     = "Allow"
+#   protocol                  = "Tcp"
+#   source_port_range         = "*"
+#   destination_port_range    = "22"  # SSH port
+#   source_address_prefix     = var.full_cidr[0]  # Use the VNet CIDR block (10.0.0.0/16)
+#   destination_address_prefix = "*"
+#   description               = "Allow SSH access from Bastion and VMs within the VNet"
+#   }
 
-  # -- outbound rules -- #
+#   # -- outbound rules -- #
 
-}
+# }
 
-#2 blocks to associate nsg with subnets the db are located in
-resource "azurerm_subnet_network_security_group_association" "zone1_db" {
-  subnet_id                 = azurerm_subnet.db_subnets[0].id
-  network_security_group_id = azurerm_network_security_group.db_nsg.id
-}
+# #2 blocks to associate nsg with subnets the db are located in
+# resource "azurerm_subnet_network_security_group_association" "zone1_db" {
+#   subnet_id                 = azurerm_subnet.db_subnets[0].id
+#   network_security_group_id = azurerm_network_security_group.db_nsg.id
+# }
 
-resource "azurerm_subnet_network_security_group_association" "zone2_db" {
-  subnet_id                 = azurerm_subnet.db_subnets[1].id
-  network_security_group_id = azurerm_network_security_group.db_nsg.id
-}
+# resource "azurerm_subnet_network_security_group_association" "zone2_db" {
+#   subnet_id                 = azurerm_subnet.db_subnets[1].id
+#   network_security_group_id = azurerm_network_security_group.db_nsg.id
+# }
 
 #---------------------------- bastion & IP -----------------------------#
 // includes all things bastion
@@ -761,11 +764,26 @@ resource "azurerm_application_gateway" "app_gateway" {
     frontend_port_name = local.frontend_port_name
   }
 
+  probe {
+    name = "vmss-health-probe"
+    protocol = "Http"
+    host = "localhost"                    # or a custom hostname if your app listens on it
+    path = "/"                            # or another path your app responds to
+    interval = 10                         # seconds
+    timeout = 8                          # seconds
+    unhealthy_threshold = 3
+    pick_host_name_from_backend_http_settings = false
+    match {
+      status_code = ["200-399"]
+    } 
+  }
+
   backend_http_settings {
     name = local.http_setting_name
     protocol = "Http"
     port = 80
     cookie_based_affinity = "Disabled"
+    probe_name = "vmss-health-probe"
   }
 
   request_routing_rule {
@@ -777,11 +795,9 @@ resource "azurerm_application_gateway" "app_gateway" {
     priority = 1
   }
 
-  backend_address_pool {
+  backend_address_pool {                                            // leave ip addresses empty for now  replace with -> azurerm_network_interface.vmss.private_ip_address,azurerm_network_interface.vmss_2.private_ip_address
     name = local.backend_address_pool_name 
-    ip_addresses = [                                                // refer to the vm scale set network interface cards
-    azurerm_network_interface.vmss.private_ip_address,
-    azurerm_network_interface.vmss_2.private_ip_address]  
+    //ip_addresses = [    ]                                            // refer to the vm scale set network interface cards      // use this the correct way; backend pool with an associated backend address pool backend 
   }
 
   sku {
@@ -794,6 +810,8 @@ resource "azurerm_application_gateway" "app_gateway" {
     min_capacity = 2
     max_capacity = 12
   }
+
+  
 }
 
 #----------------------------------- key vault & private key --------------------------------------#
@@ -861,7 +879,7 @@ data "azurerm_client_config" "current" {}
 resource "azurerm_key_vault_access_policy" "user1" {
   key_vault_id = azurerm_key_vault.key_vault.id
   tenant_id    = "16983dae-9f48-4a35-b9f5-0519bf3cdf09"
-  object_id    = "900a20af-26d8-47b0-85d0-b1437c8af627"  # User 1 object ID
+  object_id    = "900a20af-26d8-47b0-85d0-b1437c8af627"  # User 1 object ID       // if not try
 
   key_permissions = [
     "Get", "List", "Create", "Update", "Import"
@@ -920,6 +938,13 @@ resource "azurerm_key_vault_access_policy" "terraform_application" {
   depends_on = [azurerm_key_vault.key_vault]
 }
 
+
+#------------------------------------ scale set image ---------------------------------------#
+// create pre-baked image on portal, refer to it using source_image_id in vmss block
+# data "azurerm_image" "name" {
+  
+# }
+
 #------------------------------------ linux scale sets ---------------------------------------#
 
 //created two scale sets per subnet for more granular control
@@ -956,28 +981,32 @@ resource "azurerm_linux_virtual_machine_scale_set" "linux_vm" {
     caching = "ReadWrite"
   }
   network_interface {
-    name = "net-interface"
+    name = "vmss1-interface"
     primary = true
 
     ip_configuration {
       name = "ip-config"
       subnet_id = azurerm_subnet.vm_subnets[0].id
-    }
+      
+      application_gateway_backend_address_pool_ids = [              // assign this to each each vmss ip-config block, app gateway will target the vmss instances
+        for pool in azurerm_application_gateway.app_gateway.backend_address_pool : pool.id
+        ]    
+    } 
   }
 }
 
-// network interface for first vm scale set - this block is referenced in the agw backend pool private IP
-resource "azurerm_network_interface" "vmss" {
-  name                = "vmss-nic"
-  location            = data.azurerm_resource_group.main.location
-  resource_group_name = data.azurerm_resource_group.main.name
+// delete this net interface block, you already have inlide block in the vmss above
+# resource "azurerm_network_interface" "vmss" {
+#   name                = "vmss-nic"
+#   location            = data.azurerm_resource_group.main.location
+#   resource_group_name = data.azurerm_resource_group.main.name
 
-  ip_configuration {
-    name                          = "vmss-nic"
-    subnet_id                     = azurerm_subnet.vm_subnets[0].id
-    private_ip_address_allocation = "Dynamic"
-  }
-}
+#   ip_configuration {
+#     name                          = "vmss-nic"
+#     subnet_id                     = azurerm_subnet.vm_subnets[0].id
+#     private_ip_address_allocation = "Dynamic"
+#   }
+# }
 
 # --- zone 2 scale set --- #
 
@@ -1002,7 +1031,7 @@ resource "azurerm_linux_virtual_machine_scale_set" "linux_vm2" {
     username = "Admin0"
     
   }
-
+  
   source_image_reference {
     publisher = "Canonical"
     offer     = "0001-com-ubuntu-server-jammy"
@@ -1016,28 +1045,31 @@ resource "azurerm_linux_virtual_machine_scale_set" "linux_vm2" {
   }
 
   network_interface {
-    name = "net-interface"
+    name = "vmss2-interface"
     primary = true
 
     ip_configuration {
       name = "ip-config"
       subnet_id = azurerm_subnet.vm_subnets[1].id
+      application_gateway_backend_address_pool_ids = [              // assign this to each each vmss ip-config block, app gateway will target the vmss instances
+        for pool in azurerm_application_gateway.app_gateway.backend_address_pool : pool.id
+        ]    
     }
   }
 }
 
-// network interface for second vm scale set - this block is referenced in the agw backend pool private IP
-resource "azurerm_network_interface" "vmss_2" {
-  name                = "vmss2-nic"
-  location            = data.azurerm_resource_group.main.location
-  resource_group_name = data.azurerm_resource_group.main.name
+// delete this net interface block, you already have inlide block in the vmss above
+# resource "azurerm_network_interface" "vmss_2" {
+#   name                = "vmss2-nic"
+#   location            = data.azurerm_resource_group.main.location
+#   resource_group_name = data.azurerm_resource_group.main.name
 
-  ip_configuration {
-    name                          = "vmss-2-nic"
-    subnet_id                     = azurerm_subnet.vm_subnets[1].id
-    private_ip_address_allocation = "Dynamic"
-  }
-}
+#   ip_configuration {
+#     name                          = "vmss-2-nic"
+#     subnet_id                     = azurerm_subnet.vm_subnets[1].id
+#     private_ip_address_allocation = "Dynamic"
+#   }
+# }
 
 
 #---------------------------- database server -----------------------------#
@@ -1096,32 +1128,6 @@ resource "azurerm_private_dns_zone_virtual_network_link" "zone_link" {
 }
 
 
-# #---------------------------- storage accounts -----------------------------#
-
-# resource "azurerm_storage_account" "storage" {
-#   name                     = "s3mf37"
-#   resource_group_name      = data.azurerm_resource_group.main.name
-#   location                 = data.azurerm_resource_group.main.location
-#   account_tier             = "Standard"
-#   account_replication_type = "LRS"
-# }
-
-# resource "azurerm_storage_container" "container" {
-#   name                  = "content"
-#   storage_account_id = azurerm_storage_account.storage.id
-#   container_access_type = "private"
-# }
-
-# resource "azurerm_storage_blob" "blob" {
-#   name                   = "blob"
-#   storage_account_name   = azurerm_storage_account.storage.name
-#   storage_container_name = azurerm_storage_container.container.name
-#   type                   = "Block"
-#   source                 = "error.html"
-#   content_type = "text/html"  
-# }
-
-
 # #---------------------------- diagnostics & log analytics workspace -----------------------------#
 
 # resource "azurerm_log_analytics_workspace" "example" {
@@ -1131,6 +1137,9 @@ resource "azurerm_private_dns_zone_virtual_network_link" "zone_link" {
 #   sku                 = "PerGB2018"
 #   retention_in_days   = 30
 # }
+
+
+
 
 
 # #---------------------------- route 53 -----------------------------#
